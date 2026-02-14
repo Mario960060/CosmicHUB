@@ -1,0 +1,391 @@
+// CURSOR: Transform database data to canvas objects
+// Calculates positions, sizes, colors
+// If positionsMap provided, uses saved positions instead of auto-layout
+
+import type { CanvasObject, Dependency, Point } from './types';
+import { calculateTaskProgress, calculateModuleProgress } from './progress';
+
+function daysRemaining(dueDate: string | null): number | null {
+  if (!dueDate) return null;
+  const now = new Date();
+  const due = new Date(dueDate);
+  return Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+const SATELLITE_TYPE_TO_CSS: Record<string, string> = {
+  questions: 'sphere-drone',
+  issues: 'hex-drone',
+  notes: 'voyager-probe',
+  documents: 'space-station',
+  checklist: 'pulse-beacon',
+  metrics: 'astro-gauge',
+  ideas: 'nebula-spark',
+  repo: 'core-module',
+};
+
+export type PositionsMap = Map<string, { x: number; y: number }>;
+
+function getPos(map: PositionsMap | undefined, entityType: string, entityId: string, viewContext: string, moduleId?: string | null): { x: number; y: number } | undefined {
+  if (!map) return undefined;
+  const key = viewContext === 'module' && moduleId
+    ? `${entityType}:${entityId}:${moduleId}`
+    : `${entityType}:${entityId}:solar_system`;
+  return map.get(key);
+}
+
+// Calculate progress from work logs
+function calculateProgress(
+  estimatedHours: number | null,
+  workLogs?: { hours_spent: number }[]
+): number {
+  if (!estimatedHours || estimatedHours === 0) return 0;
+  
+  const totalSpent = workLogs?.reduce((sum, log) => sum + log.hours_spent, 0) || 0;
+  return Math.min(100, (totalSpent / estimatedHours) * 100);
+}
+
+// Get color based on status
+function getStatusColor(status: string): string {
+  const colors: Record<string, string> = {
+    active: '#10b981',    // Green
+    in_progress: '#f59e0b', // Yellow
+    done: '#00d9ff',      // Cyan
+    blocked: '#ef4444',   // Red
+    on_hold: '#8b5cf6',   // Purple
+    todo: '#6b7280',      // Gray
+    completed: '#00d9ff', // Cyan
+    cancelled: '#6b7280', // Gray
+  };
+  return colors[status] || '#a855f7';
+}
+
+// Galaxy view: Projects as planets
+export function transformProjectsToCanvas(
+  projects: any[],
+  canvasWidth: number,
+  canvasHeight: number
+): CanvasObject[] {
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const baseRadius = Math.min(canvasWidth, canvasHeight) * 0.3;
+
+  return projects.map((project, index) => {
+    const angle = (index / projects.length) * Math.PI * 2;
+    const distance = baseRadius + Math.random() * 100;
+    
+    return {
+      id: project.id,
+      type: 'project' as const,
+      name: project.name,
+      position: {
+        x: centerX + Math.cos(angle) * distance,
+        y: centerY + Math.sin(angle) * distance,
+      },
+      radius: 40 + Math.random() * 20, // 40-60px
+      color: getStatusColor(project.status),
+      status: project.status,
+      metadata: {
+        projectId: project.id,
+        sunType: project.sun_type || 'yellow-star', // Pass sun type
+        status: project.status,
+      },
+    };
+  });
+}
+
+// Project view: Modules as satellites
+export function transformModulesToCanvas(
+  modules: any[],
+  projectPosition: Point,
+  canvasWidth: number,
+  canvasHeight: number,
+  projectData?: any,
+  positionsMap?: PositionsMap
+): CanvasObject[] {
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const orbitRadius = 320; /* planety lekko oddalone od słońca */
+
+  const projectPos = getPos(positionsMap, 'project', projectData?.id || 'project-center', 'solar_system') ?? { x: centerX, y: centerY };
+
+  const objects: CanvasObject[] = [
+    // Central project
+    {
+      id: projectData?.id || 'project-center',
+      type: 'project' as const,
+      name: projectData?.name || 'Project',
+      position: projectPos,
+      radius: 60,
+      color: getStatusColor(projectData?.status || 'active'),
+      status: projectData?.status || 'active',
+      metadata: {
+        projectId: projectData?.id,
+        sunType: projectData?.sun_type || 'yellow-star',
+        status: projectData?.status,
+      },
+    },
+  ];
+
+  /* Równy kątowy odstęp: każda planeta w tej samej odległości od słońca */
+  const taskOrbitRadius = 80; /* miniatury tasków dookoła planet (oddalone od planety) */
+  modules.forEach((module, index) => {
+    const angle =
+      modules.length <= 1 ? -Math.PI / 2 : (index / modules.length) * Math.PI * 2 - Math.PI / 2;
+    
+    const defaultX = centerX + Math.cos(angle) * orbitRadius;
+    const defaultY = centerY + Math.sin(angle) * orbitRadius;
+    const modPos = getPos(positionsMap, 'module', module.id, 'solar_system') ?? { x: defaultX, y: defaultY };
+    
+    const moduleTasks = module.tasks || [];
+    const avgPriority =
+      module.priority_stars != null
+        ? (module.priority_stars as number)
+        : moduleTasks.length > 0
+          ? moduleTasks.reduce((s: number, t: any) => s + (t.priority_stars ?? 1), 0) / moduleTasks.length
+          : 1;
+    const moduleProgress = calculateModuleProgress(moduleTasks, (module as any).progress_percent);
+    objects.push({
+      id: module.id,
+      type: 'module' as const,
+      name: module.name,
+      position: modPos,
+      radius: 30,
+      color: module.color || '#a855f7',
+      progress: moduleProgress,
+      metadata: {
+        projectId: module.project_id,
+        moduleId: module.id,
+        taskCount: moduleTasks.length,
+        planetType: module.planet_type || 'ocean',
+        due_date: module.due_date,
+        dueDateDays: daysRemaining(module.due_date),
+        priorityStars: avgPriority,
+      },
+    });
+
+    /* Miniatury tasków dookoła modułu (planety) */
+    const tasks = module.tasks || [];
+    tasks.forEach((task: any, taskIndex: number) => {
+      const taskAngle =
+        tasks.length <= 1 ? -Math.PI / 2 : (taskIndex / tasks.length) * Math.PI * 2 - Math.PI / 2;
+      const defaultTaskX = modPos.x + Math.cos(taskAngle) * taskOrbitRadius;
+      const defaultTaskY = modPos.y + Math.sin(taskAngle) * taskOrbitRadius;
+      const taskPos = getPos(positionsMap, 'task', task.id, 'solar_system') ?? { x: defaultTaskX, y: defaultTaskY };
+      const taskProgress = calculateTaskProgress(task.subtasks || [], task.progress_percent);
+      objects.push({
+        id: task.id,
+        type: 'task' as const,
+        name: task.name,
+        position: taskPos,
+        radius: 12,
+        color: getStatusColor(task.status),
+        status: task.status,
+        progress: taskProgress,
+        metadata: {
+          moduleId: task.module_id,
+          taskId: task.id,
+          spacecraftType: task.spacecraft_type || 'rocky-moon',
+          priorityStars: task.priority_stars,
+          status: task.status,
+          due_date: task.due_date,
+          dueDateDays: daysRemaining(task.due_date),
+          isBlocked: task.status === 'blocked',
+          isComplete: task.status === 'done' || task.status === 'completed',
+          isMiniature: true,
+        },
+      });
+    });
+  });
+
+  return objects;
+}
+
+const CANVAS_WIDTH = 1920;
+const CANVAS_HEIGHT = 1080;
+// Portale domyślnie w połowie odległości od modułu (środek) do krawędzi – użytkownik może przesunąć
+const PORTAL_OFFSET_FROM_CENTER = (CANVAS_WIDTH / 2) / 2; // połowa odległości od centrum do krawędzi
+const PORTAL_LEFT_X = CANVAS_WIDTH / 2 - PORTAL_OFFSET_FROM_CENTER;  // 480
+const PORTAL_RIGHT_X = CANVAS_WIDTH / 2 + PORTAL_OFFSET_FROM_CENTER; // 1440
+const PORTAL_BASE_Y = 300;
+const PORTAL_STEP_Y = 150;
+
+// Module view: Tasks as satellites around planet - simple circular layout
+// otherModules: other modules in the same project (for portal generation). Portals only if len > 0
+export function transformTasksToCanvas(
+  tasks: any[],
+  modulePosition: Point,
+  canvasWidth: number,
+  canvasHeight: number,
+  moduleData?: any,
+  positionsMap?: PositionsMap,
+  moduleId?: string,
+  otherModules?: { id: string; name: string; color?: string }[]
+): CanvasObject[] {
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const orbitRadius = 350; // Jedna orbita dla wszystkich zadań
+
+  const modPos = getPos(positionsMap, 'module', moduleData?.id || 'module-center', 'module', moduleId) ?? { x: centerX, y: centerY };
+
+  const moduleTasks = tasks || [];
+  const avgPriority =
+    moduleTasks.length > 0
+      ? moduleTasks.reduce((s: number, t: any) => s + (t.priority_stars ?? 1), 0) / moduleTasks.length
+      : 1;
+  const moduleProgress = calculateModuleProgress(moduleTasks, moduleData?.progress_percent);
+
+  const objects: CanvasObject[] = [
+    // Central module
+    {
+      id: moduleData?.id || 'module-center',
+      type: 'module' as const,
+      name: moduleData?.name || 'Module',
+      position: modPos,
+      radius: 50,
+      color: moduleData?.color || '#a855f7',
+      progress: moduleProgress,
+      metadata: {
+        moduleId: moduleData?.id,
+        projectId: moduleData?.project_id,
+        planetType: moduleData?.planet_type || 'ocean',
+        due_date: moduleData?.due_date,
+        dueDateDays: daysRemaining(moduleData?.due_date ?? null),
+        priorityStars: avgPriority,
+      },
+    },
+  ];
+
+  // Równomierne rozmieszczenie zadań dookoła
+  tasks.forEach((task, taskIndex) => {
+    const angle =
+      tasks.length <= 1 ? -Math.PI / 2 : (taskIndex / tasks.length) * Math.PI * 2 - Math.PI / 2;
+    const defaultTaskX = centerX + Math.cos(angle) * orbitRadius;
+    const defaultTaskY = centerY + Math.sin(angle) * orbitRadius;
+    const taskPos = getPos(positionsMap, 'task', task.id, 'module', moduleId) ?? { x: defaultTaskX, y: defaultTaskY };
+    const taskProgress = calculateTaskProgress(task.subtasks || [], task.progress_percent);
+
+    objects.push({
+      id: task.id,
+      type: 'task' as const,
+      name: task.name,
+      position: taskPos,
+      radius: 25,
+      color: getStatusColor(task.status),
+      status: task.status,
+      progress: taskProgress,
+      metadata: {
+        moduleId: task.module_id,
+        taskId: task.id,
+        spacecraftType: task.spacecraft_type || 'rocky-moon',
+        priorityStars: task.priority_stars,
+        status: task.status,
+        due_date: task.due_date,
+        dueDateDays: daysRemaining(task.due_date),
+        isBlocked: task.status === 'blocked',
+        isComplete: task.status === 'done' || task.status === 'completed',
+      },
+    });
+
+    // Subtasks dookoła zadania
+    if (task.subtasks && task.subtasks.length > 0) {
+      const subRadius = 70;
+      task.subtasks.forEach((subtask: any, subIndex: number) => {
+        const subAngle = angle + (subIndex / task.subtasks.length) * Math.PI * 0.5;
+        const defaultSubX = taskPos.x + Math.cos(subAngle) * subRadius;
+        const defaultSubY = taskPos.y + Math.sin(subAngle) * subRadius;
+        const subPos = getPos(positionsMap, 'subtask', subtask.id, 'module', moduleId) ?? { x: defaultSubX, y: defaultSubY };
+        const satelliteType = subtask.satellite_type || 'notes';
+        const spacecraftType = SATELLITE_TYPE_TO_CSS[satelliteType] || 'voyager-probe';
+        objects.push({
+          id: subtask.id,
+          type: 'subtask' as const,
+          name: subtask.name,
+          position: subPos,
+          radius: 20,
+          color: getStatusColor(subtask.status),
+          status: subtask.status,
+          metadata: {
+            taskId: task.id,
+            subtaskId: subtask.id,
+            priorityStars: subtask.priority_stars,
+            spacecraftType,
+            satelliteType,
+            isMiniature: true,
+          },
+        });
+      });
+    }
+  });
+
+  // Portals to other modules (only when viewing a module and there are 2+ modules total)
+  if (moduleId && otherModules && otherModules.length > 0) {
+    otherModules.forEach((mod, idx) => {
+      if (mod.id === moduleId) return; // skip current module
+      const portalId = `portal-${mod.id}`;
+      const side = idx % 2 === 0 ? 'left' : 'right';
+      const baseX = side === 'left' ? PORTAL_LEFT_X : PORTAL_RIGHT_X;
+      const defaultY = PORTAL_BASE_Y + Math.floor(idx / 2) * PORTAL_STEP_Y;
+      const defaultPos = { x: baseX, y: defaultY };
+      const portalPos = getPos(positionsMap, 'portal', mod.id, 'module', moduleId) ?? defaultPos;
+      objects.push({
+        id: portalId,
+        type: 'portal' as const,
+        name: `Portal → ${mod.name}`,
+        position: portalPos,
+        radius: 35,
+        color: mod.color || '#a855f7',
+        metadata: {
+          portalTargetModuleId: mod.id,
+          portalTargetModuleName: mod.name,
+          portalTargetModuleColor: mod.color || '#a855f7',
+        },
+      });
+    });
+  }
+
+  return objects;
+}
+
+// Transform dependencies - supports polymorphic (source_type/id, target_type/id)
+// For cross-module deps: maps remote endpoint to portal. dep should have source_module_id, target_module_id (from query)
+export function transformDependencies(
+  dependencies: any[],
+  objects: CanvasObject[],
+  currentModuleId?: string
+): Dependency[] {
+  return dependencies.map((dep) => {
+    const srcType = dep.source_type || 'subtask';
+    const tgtType = dep.target_type || 'subtask';
+    const srcId = dep.source_id ?? dep.dependent_task_id;
+    const tgtId = dep.target_id ?? dep.depends_on_task_id;
+
+    let fromId = srcId;
+    let toId = tgtId;
+    const srcModuleId = dep.source_module_id ?? (srcType === 'module' ? srcId : null);
+    const tgtModuleId = dep.target_module_id ?? (tgtType === 'module' ? tgtId : null);
+
+    if (currentModuleId && (srcModuleId || tgtModuleId)) {
+      if (tgtModuleId && tgtModuleId !== currentModuleId) {
+        toId = `portal-${tgtModuleId}`;
+      }
+      if (srcModuleId && srcModuleId !== currentModuleId) {
+        fromId = `portal-${srcModuleId}`;
+      }
+    }
+
+    const fromObj = objects.find((o) => o.id === fromId);
+    const toObj = objects.find((o) => o.id === toId);
+
+    return {
+      id: dep.id,
+      from: fromId,
+      to: toId,
+      fromPos: fromObj?.position,
+      toPos: toObj?.position,
+      dependencyType: dep.dependency_type || 'depends_on',
+      sourceType: srcType,
+      targetType: tgtType,
+      isResolved: dep.target_status === 'done' || dep.target_status === 'completed',
+    };
+  });
+}

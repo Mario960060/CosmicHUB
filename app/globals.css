@@ -1,26 +1,511 @@
-@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap');
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #0a0e1a;
+  color: #00d9ff;
+  padding-top: 4rem;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ============================================ */
+/* ANIMATIONS */
+/* ============================================ */
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes pulse-slow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-40px); }
+}
+
+@keyframes gridMove {
+  0% { transform: translateY(0px); }
+  100% { transform: translateY(50px); }
+}
+
+.animate-pulse {
+  animation: pulse-slow 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.delay-1000 {
+  animation-delay: 1s;
+}
+
+.delay-2000 {
+  animation-delay: 2s;
+}
+
+@keyframes commsPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-comms-pulse {
+  animation: commsPulse 2s ease-in-out infinite;
+}
+
+/* ============================================ */
+/* COSMIC SPACESHIP UI - Glassmorphism & Neon */
+/* ============================================ */
+
+/* Glass Panel Effects */
+.glass-panel {
+  background: rgba(21, 27, 46, 0.6);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 217, 255, 0.2);
+  box-shadow: 
+    0 0 30px rgba(0, 217, 255, 0.1),
+    inset 0 0 20px rgba(0, 217, 255, 0.05);
+}
+
+.glass-card {
+  background: rgba(21, 27, 46, 0.4);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(168, 85, 247, 0.15);
+  transition: all 0.3s ease;
+}
+
+.glass-card:hover {
+  border-color: rgba(0, 217, 255, 0.5);
+  box-shadow: 0 0 25px rgba(0, 217, 255, 0.3);
+  transform: translateY(-2px);
+}
+
+/* Cosmic form controls – inputs, selects, textareas (cyan/marine theme) */
+.glass-input,
+input.glass-input,
+select.glass-input,
+textarea.glass-input {
+  color: #00d9ff;
+  background: rgba(0, 50, 80, 0.6);
+  border: 1px solid rgba(0, 188, 212, 0.9);
+  backdrop-filter: blur(10px);
+  transition: all 0.2s ease;
+}
+
+.glass-input::placeholder,
+input.glass-input::placeholder,
+textarea.glass-input::placeholder {
+  color: rgba(0, 217, 255, 0.5);
+}
+
+.glass-input:focus,
+input.glass-input:focus,
+select.glass-input:focus,
+textarea.glass-input:focus {
+  border-color: rgba(0, 188, 212, 0.95);
+  box-shadow: 0 0 20px rgba(0, 188, 212, 0.25);
+  outline: none;
+}
+
+/* Select dropdown options – style the element; native option list is browser-controlled */
+select.glass-input option {
+  background: rgba(5, 25, 45, 0.98);
+  color: #00d9ff;
+}
+
+/* AssignTeamModal dropdown – dark cosmic theme */
+.assign-modal-select,
+.assign-modal-select:focus {
+  background: rgba(21, 27, 46, 0.98) !important;
+  color: #00d9ff !important;
+  border-color: rgba(0, 217, 255, 0.3) !important;
+  outline: none !important;
+}
+.assign-modal-select option {
+  background: rgba(21, 27, 46, 1) !important;
+  color: #00d9ff !important;
+}
+
+/* Light form inputs – jasne tło, ciemny tekst (np. Create Project) */
+.form-input-light,
+input.form-input-light,
+select.form-input-light,
+textarea.form-input-light,
+button.form-input-light {
+  background: rgba(176, 224, 230, 0.65) !important;
+  color: #0c4a6e !important;
+  border: 1px solid rgba(0, 188, 212, 0.85);
+}
+.form-input-light::placeholder,
+input.form-input-light::placeholder,
+textarea.form-input-light::placeholder {
+  color: #0e7490 !important;
+}
+.form-input-light:focus,
+input.form-input-light:focus,
+select.form-input-light:focus,
+textarea.form-input-light:focus {
+  border-color: rgba(0, 188, 212, 0.95);
+  box-shadow: 0 0 16px rgba(0, 188, 212, 0.3);
+  outline: none;
+}
+select.form-input-light option {
+  background: rgba(200, 235, 245, 0.95);
+  color: #0c4a6e;
+}
+
+/* Neon Text Effects */
+.neon-text {
+  text-shadow: 
+    0 0 10px currentColor,
+    0 0 20px currentColor,
+    0 0 30px currentColor;
+}
+
+.neon-cyan { 
+  color: #00d9ff;
+  text-shadow: 0 0 10px #00d9ff, 0 0 20px #00d9ff;
+}
+
+.neon-purple { 
+  color: #a855f7;
+  text-shadow: 0 0 10px #a855f7, 0 0 20px #a855f7;
+}
+
+.neon-orange { 
+  color: #ff6b35;
+  text-shadow: 0 0 10px #ff6b35, 0 0 20px #ff6b35;
+}
+
+/* Glow Effects */
+.glow-cyan {
+  box-shadow: 0 0 20px rgba(0, 217, 255, 0.5);
+}
+
+.glow-purple {
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+}
+
+.glow-orange {
+  box-shadow: 0 0 20px rgba(255, 107, 53, 0.5);
+}
+
+.glow-cyan-lg {
+  box-shadow: 0 0 30px rgba(0, 217, 255, 0.6);
+}
+
+.glow-purple-lg {
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.6);
+}
+
+/* Button Glow */
+.btn-glow {
+  background: linear-gradient(135deg, rgba(0,217,255,0.2), rgba(168,85,247,0.2));
+  border: 1px solid rgba(0, 217, 255, 0.4);
+  box-shadow: 0 0 20px rgba(0, 217, 255, 0.3);
+  transition: all 0.3s ease;
+}
+
+.btn-glow:hover {
+  box-shadow: 0 0 30px rgba(0, 217, 255, 0.6);
+  transform: scale(1.05);
+}
+
+.btn-holographic {
+  background: linear-gradient(135deg, 
+    rgba(0,217,255,0.15) 0%, 
+    rgba(168,85,247,0.15) 50%, 
+    rgba(255,107,53,0.15) 100%
+  );
+  border: 1px solid rgba(0, 217, 255, 0.3);
+  box-shadow: 0 0 15px rgba(0, 217, 255, 0.2);
+  transition: all 0.3s ease;
+}
+
+.btn-holographic:hover {
+  box-shadow: 
+    0 0 25px rgba(0, 217, 255, 0.4),
+    0 0 50px rgba(168, 85, 247, 0.3);
+  transform: translateY(-2px);
+}
+
+/* Stat Card Holographic */
+.stat-holographic {
+  position: relative;
+  background: linear-gradient(135deg, 
+    rgba(0,217,255,0.05) 0%, 
+    rgba(168,85,247,0.05) 100%
+  );
+  border: 1px solid rgba(0, 217, 255, 0.3);
+  transition: all 0.4s ease;
+}
+
+.stat-holographic:hover {
+  transform: translateY(-4px);
+  box-shadow: 
+    0 0 30px rgba(0, 217, 255, 0.4),
+    inset 0 0 20px rgba(0, 217, 255, 0.1);
+}
+
+.stat-holographic::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(0,217,255,0.8), 
+    transparent
+  );
+  animation: shimmer 3s infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* Animated Background Gradient */
+.bg-animated-gradient {
+  background: linear-gradient(135deg, 
+    rgba(0,217,255,0.1) 0%, 
+    rgba(168,85,247,0.1) 50%, 
+    rgba(255,107,53,0.1) 100%
+  );
+  background-size: 200% 200%;
+  animation: gradient-shift 8s ease infinite;
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* Corner Accents */
+.corner-accent {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(0, 217, 255, 0.5);
+}
+
+.corner-accent-tl { top: 0; left: 0; border-bottom: none; border-right: none; }
+.corner-accent-tr { top: 0; right: 0; border-bottom: none; border-left: none; }
+.corner-accent-bl { bottom: 0; left: 0; border-top: none; border-right: none; }
+.corner-accent-br { bottom: 0; right: 0; border-top: none; border-left: none; }
+
+/* Scan Line Effect */
+.scanline {
+  position: relative;
+  overflow: hidden;
+}
+
+.scanline::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(0,217,255,0.6), 
+    transparent
+  );
+  animation: scan 3s linear infinite;
+}
+
+@keyframes scan {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(500px); }
+}
+
+/* Pulse Glow Animation */
+.pulse-glow {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { 
+    box-shadow: 0 0 10px rgba(0, 217, 255, 0.3);
+  }
+  50% { 
+    box-shadow: 0 0 25px rgba(0, 217, 255, 0.6);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Holographic Border */
+.holo-border {
+  position: relative;
+}
+
+.holo-border::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, 
+    rgba(0,217,255,0.5), 
+    rgba(168,85,247,0.5), 
+    rgba(255,107,53,0.5)
+  );
+  -webkit-mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Online Indicator Pulse */
+.online-pulse {
+  animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.1);
+  }
+}
+
+/* Data Table Enhanced */
+.data-table {
+  background: rgba(21, 27, 46, 0.3);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 217, 255, 0.1);
+}
+
+.data-table-header {
+  background: rgba(0, 217, 255, 0.05);
+  border-bottom: 1px solid rgba(0, 217, 255, 0.2);
+}
+
+.data-table-row {
+  border-bottom: 1px solid rgba(0, 217, 255, 0.05);
+  transition: all 0.2s ease;
+}
+
+.data-table-row:hover {
+  background: rgba(0, 217, 255, 0.05);
+  box-shadow: inset 0 0 20px rgba(0, 217, 255, 0.1);
+}
+
+/* Progress Bar Animated */
+.progress-animated {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-animated::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 30%;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(255,255,255,0.3), 
+    transparent
+  );
+  animation: progress-shine 2s ease-in-out infinite;
+}
+
+@keyframes progress-shine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* ============================================ */
+/* HEADER NAVIGATION - Force Bright Colors */
+/* ============================================ */
+
+/* Force bright cyan color for ALL buttons in header */
+header button {
+  color: #00d9ff !important;
+  font-weight: 600 !important;
+  text-shadow: 0 0 10px rgba(0, 217, 255, 0.5) !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Hover effects */
+header button:hover {
+  color: #00d9ff !important;
+  text-shadow: 0 0 20px rgba(0, 217, 255, 0.8) !important;
+  transform: scale(1.1) !important;
+  background: rgba(0, 217, 255, 0.1) !important;
+}
+
+/* Hide scrollbar and scroll indicators */
+header {
+  overflow-x: hidden !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+header::-webkit-scrollbar {
+  display: none !important;
+}
+
+/* Remove any scroll indicators/arrows */
+header::before,
+header::after {
+  display: none !important;
+}
+
+/* Remove white background from autofill inputs */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px rgba(15, 23, 42, 0.7) inset !important;
+  -webkit-text-fill-color: #cffafe !important;
+}
+
+/* ============================================ */
+/* CUSTOM SCROLLBAR - Cosmic UI Theme */
+/* ============================================ */
+
+.scrollbar-cosmic {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 240, 255, 0.4) rgba(0, 240, 255, 0.08);
+}
+
+.scrollbar-cosmic::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-cosmic::-webkit-scrollbar-track {
+  background: rgba(0, 240, 255, 0.06);
+  border-radius: 4px;
+}
+
+.scrollbar-cosmic::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.35);
+  border-radius: 4px;
+}
+
+.scrollbar-cosmic::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.55);
+}
+
+.scrollbar-cosmic::-webkit-scrollbar-corner {
+  background: transparent;
 }

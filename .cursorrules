@@ -1,0 +1,61 @@
+PROJECT: Cosmic Project Hub - AI-powered project management system
+
+TECH STACK:
+- Next.js 14 (App Router)
+- TypeScript (strict mode)
+- Supabase (PostgreSQL + Auth + Storage + Realtime)
+- Tailwind CSS (Cosmic theme)
+- React Query (data fetching)
+- Zustand (client state)
+- Framer Motion (animations)
+
+CODE STYLE:
+- TypeScript strict mode (no 'any' types)
+- Functional components with hooks
+- Server/Client components separation
+- Named exports over default exports
+- Descriptive variable names
+- Comments for complex logic
+
+COSMIC THEME:
+- Background: #0a0e1a (deep space)
+- Surface: #151b2e (cosmic navy)
+- Primary: #00d9ff (cyan neon)
+- Secondary: #a855f7 (purple nebula)
+- Accent: #ff6b35 (orange supernova)
+- Fonts: Orbitron (display), Space Grotesk (body)
+
+DATABASE:
+- Use snake_case for columns
+- Use camelCase in TypeScript
+- Always use RLS policies
+- Never bypass RLS in code
+- Use Supabase client functions
+
+BEST PRACTICES:
+- Always validate user input (zod)
+- Handle errors gracefully
+- Show loading states
+- Use optimistic updates
+- Log errors to console
+- Comment complex logic
+- Write semantic HTML
+- Accessibility (ARIA labels)
+
+FORBIDDEN:
+- No inline styles (use Tailwind)
+- No CSS-in-JS libraries
+- No external state management (only Zustand)
+- No bypassing RLS
+- No storing secrets in code
+- No 'any' types
+
+WORKFLOW:
+- Read phase documentation fully
+- Implement files in order
+- Test after each major feature
+- Commit frequently with clear messages
+- Check for TypeScript errors
+- Check for console errors
+
+When implementing, follow the phase documents exactly and ask for clarification if unsure.
