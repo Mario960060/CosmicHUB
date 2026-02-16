@@ -195,7 +195,7 @@ export function EditProjectDialog({
   };
 
   return (
-    <div onClick={handleClose} style={modalStyle}>
+    <div style={modalStyle}>
       <div onClick={(e) => e.stopPropagation()} style={contentStyle}>
         <div
           style={{

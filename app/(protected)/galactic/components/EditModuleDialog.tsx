@@ -152,7 +152,7 @@ export function EditModuleDialog({
   };
 
   return (
-    <div onClick={onClose} style={modalStyle}>
+    <div style={modalStyle}>
       <div onClick={(e) => e.stopPropagation()} style={contentStyle}>
         <div
           style={{

@@ -1708,8 +1708,8 @@
 
 /* Miniatury księżyców (taski w widoku Solar System) */
 .moon.sm {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
 }
 .moon.sm .moon-crater { display: none; }
 
@@ -1862,6 +1862,36 @@
 }
 
 .asteroid.sm .asteroid-crater { display: none; }
+
+/* Asteroid w module view – powiększony (większy od satelitów) */
+.asteroid.md {
+  width: 34px;
+  height: 34px;
+}
+
+.asteroid.md .asteroid-crater { display: none; }
+
+/* Extra-small asteroid (minitaski przy taskach w Solar System) */
+.asteroid.xs {
+  width: 12px;
+  height: 12px;
+}
+
+.asteroid.xs .asteroid-crater { display: none; }
+.asteroid.xs .asteroid-labels-inset { display: none; }
+.asteroid.xs .object-stars-crown { display: none; }
+
+/* Task-zoom: powiększone moon (task) i asteroidy (minitaski) o ~125% (2× 50%) */
+#galaxy-canvas.task-zoom-view .moon:not(.sm) {
+  width: 203px;
+  height: 203px;
+}
+#galaxy-canvas.task-zoom-view .asteroid.rocky,
+#galaxy-canvas.task-zoom-view .asteroid.ice,
+#galaxy-canvas.task-zoom-view .asteroid.metallic {
+  width: 113px;
+  height: 113px;
+}
 
 .asteroid-labels-inset {
   position: absolute;

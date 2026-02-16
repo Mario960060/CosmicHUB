@@ -15,6 +15,19 @@ export const SATELLITE_TYPES = [
 
 export type SatelliteType = (typeof SATELLITE_TYPES)[number]['type'];
 
+// Plural names for auto-generated subtask names: [parentName] [typePlural]
+export const SATELLITE_TYPE_PLURAL: Record<SatelliteType, string> = {
+  questions: 'Questions',
+  issues: 'Issues',
+  notes: 'Notes',
+  documents: 'Documents',
+  checklist: 'Checklists',
+  metrics: 'Metrics',
+  ideas: 'Ideas',
+  repo: 'Repo/Dev',
+  canvas: 'Canvases',
+};
+
 // Map satellite_type to galaxy CSS class
 export const SATELLITE_TYPE_TO_CSS: Record<SatelliteType, string> = {
   questions: 'sphere-drone',
@@ -26,4 +39,17 @@ export const SATELLITE_TYPE_TO_CSS: Record<SatelliteType, string> = {
   ideas: 'nebula-spark',
   repo: 'core-module',
   canvas: 'nexus-drone',
+};
+
+// Reverse: spacecraft CSS class -> satellite_type (for palette drop)
+export const SPACECRAFT_TO_SATELLITE: Record<string, SatelliteType> = {
+  'sphere-drone': 'questions',
+  'hex-drone': 'issues',
+  'voyager-probe': 'notes',
+  'space-station': 'documents',
+  'pulse-beacon': 'checklist',
+  'astro-gauge': 'metrics',
+  'nebula-spark': 'ideas',
+  'core-module': 'repo',
+  'nexus-drone': 'canvas',
 };

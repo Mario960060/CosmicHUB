@@ -39,6 +39,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [estimatedHours, setEstimatedHours] = useState('');
+  const [estimatedHoursFromMinitasks, setEstimatedHoursFromMinitasks] = useState(true);
   const [priorityStars, setPriorityStars] = useState('1.0');
   const [dueDate, setDueDate] = useState('');
   const [spacecraftType, setSpacecraftType] = useState<string>('rocky-moon');
@@ -54,7 +55,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
     }
   }, [open, initialSpacecraftType]);
 
-  const hasUnsavedChanges = name.trim() || description.trim() || estimatedHours || dueDate;
+  const hasUnsavedChanges = name.trim() || description.trim() || (!estimatedHoursFromMinitasks && estimatedHours) || dueDate;
 
   const handleClose = async () => {
     if (hasUnsavedChanges) {
@@ -78,7 +79,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
       taskSchema.parse({
         name,
         description: description || undefined,
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+        estimatedHours: !estimatedHoursFromMinitasks && estimatedHours ? parseFloat(estimatedHours) : undefined,
         priorityStars: parseFloat(priorityStars),
       });
 
@@ -86,7 +87,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
         moduleId,
         name,
         description: description || undefined,
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : null,
+        estimatedHours: estimatedHoursFromMinitasks ? null : (estimatedHours ? parseFloat(estimatedHours) : null),
         priorityStars: parseFloat(priorityStars),
         createdBy: user.id,
         spacecraftType,
@@ -98,6 +99,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
       setName('');
       setDescription('');
       setEstimatedHours('');
+      setEstimatedHoursFromMinitasks(true);
       setPriorityStars('1.0');
       setDueDate('');
       setSpacecraftType('rocky-moon');
@@ -124,7 +126,6 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
     <>
       {/* Backdrop */}
       <div 
-        onClick={handleClose}
         style={{
           position: 'fixed',
           inset: 0,
@@ -391,35 +392,46 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
             </div>
 
             {/* Hours + Priority (2 columns) */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-              {/* Estimated Hours */}
-              <div>
-                <label style={{
-                  display: 'block',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  color: '#00d9ff',
-                  marginBottom: '8px',
-                }}>
-                  Estimated Hours <span style={{ color: '#ef4444' }}>*</span>
-                </label>
+            <div style={{ marginBottom: '24px' }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '12px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  color: 'rgba(255, 255, 255, 0.85)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={estimatedHoursFromMinitasks}
+                  onChange={(e) => {
+                    setEstimatedHoursFromMinitasks(e.target.checked);
+                    if (e.target.checked) setEstimatedHours('');
+                  }}
+                  style={{ width: '18px', height: '18px', accentColor: '#00d9ff', cursor: 'pointer' }}
+                />
+                <span>Oblicz na podstawie szacowanych godzin mini zadań do tasków (księżyców)</span>
+              </label>
+              {!estimatedHoursFromMinitasks && (
                 <input
                   type="number"
                   value={estimatedHours}
                   onChange={(e) => setEstimatedHours(e.target.value)}
                   onFocus={() => setFocusedInput('hours')}
                   onBlur={() => setFocusedInput(null)}
-                  placeholder="10"
+                  placeholder="np. 10"
                   min="0.5"
                   step="0.5"
-                  required
                   style={{
                     width: '100%',
                     padding: '12px 16px',
                     background: 'rgba(0, 0, 0, 0.3)',
-                    border: focusedInput === 'hours' 
-                      ? '1px solid #00d9ff' 
-                      : errors.estimatedHours 
+                    border: focusedInput === 'hours'
+                      ? '1px solid #00d9ff'
+                      : errors.estimatedHours
                       ? '1px solid #ef4444'
                       : '1px solid rgba(0, 217, 255, 0.3)',
                     borderRadius: '12px',
@@ -430,13 +442,13 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
                     boxShadow: focusedInput === 'hours' ? '0 0 20px rgba(0, 217, 255, 0.3)' : 'none',
                   }}
                 />
-                {errors.estimatedHours && (
-                  <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>
-                    {errors.estimatedHours}
-                  </p>
-                )}
-              </div>
+              )}
+              {!estimatedHoursFromMinitasks && errors.estimatedHours && (
+                <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>{errors.estimatedHours}</p>
+              )}
+            </div>
 
+            <div style={{ marginBottom: '24px' }}>
               {/* Priority Stars */}
               <div>
                 <label style={{

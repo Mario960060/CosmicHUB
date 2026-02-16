@@ -4,8 +4,10 @@ import { useState, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { CanvasListContent } from './canvas/CanvasListContent';
 import { CanvasEditorPopup } from './canvas/CanvasEditorPopup';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { saveCanvases, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
 import { useAuth } from '@/hooks/use-auth';
+import { createClient } from '@/lib/supabase/client';
 import type { CanvasItem } from './canvas/canvas-types';
 import { createEmptyCanvas, normalizeLegacyCanvas } from './canvas/canvas-types';
 
@@ -30,17 +32,17 @@ function parseCanvases(satelliteData: Record<string, unknown>): CanvasItem[] {
   const rawLegacy = satelliteData?.canvas;
 
   if (Array.isArray(rawCanvases)) {
-    return (rawCanvases as Record<string, unknown>[]).map((c) => ({
-      id: (c.id as string) || 'legacy-canvas',
-      name: (c.name as string) ?? 'Canvas',
-      description: (c.description as string) ?? '',
-      assigned_to: (c.assigned_to as string | null) ?? null,
-      created_by: (c.created_by as string | null) ?? null,
-      viewport: (c.viewport as { x: number; y: number; zoom: number }) ?? { x: 0, y: 0, zoom: 1 },
-      gridEnabled: (c.gridEnabled as boolean) ?? false,
-      blocks: Array.isArray(c.blocks) ? c.blocks : [],
-      connections: Array.isArray(c.connections) ? c.connections : [],
-    })) as CanvasItem[];
+    return (rawCanvases as Record<string, unknown>[]).map((c) => {
+      const normalized = normalizeLegacyCanvas(c);
+      return {
+        id: (c.id as string) || 'legacy-canvas',
+        name: (c.name as string) ?? 'Canvas',
+        description: (c.description as string) ?? '',
+        assigned_to: (c.assigned_to as string | null) ?? null,
+        created_by: (c.created_by as string | null) ?? null,
+        ...normalized,
+      } as CanvasItem;
+    });
   }
 
   if (rawLegacy && typeof rawLegacy === 'object') {
@@ -68,6 +70,7 @@ export function CanvasContent({
   const invalidate = useInvalidateSatelliteQueries();
   const [canvases, setCanvases] = useState<CanvasItem[]>(() => parseCanvases(satelliteData));
   const [editingCanvasId, setEditingCanvasId] = useState<string | null>(null);
+  const [pendingDeleteCanvas, setPendingDeleteCanvas] = useState<CanvasItem | null>(null);
 
   const editingCanvas = useMemo(
     () => canvases.find((c) => c.id === editingCanvasId) ?? null,
@@ -95,6 +98,26 @@ export function CanvasContent({
 
   const handleCanvasesChange = useCallback(
     (next: CanvasItem[]) => {
+      if (user) {
+        const supabase = createClient();
+        for (const canvas of next) {
+          const prev = canvases.find((c) => c.id === canvas.id);
+          const shouldNotify =
+            canvas.assigned_to &&
+            (prev?.assigned_to !== canvas.assigned_to);
+          if (shouldNotify) {
+            void supabase.rpc('create_notification', {
+              p_user_id: canvas.assigned_to,
+              p_type: 'assignment',
+              p_title: 'Assigned to canvas',
+              p_message: `You were assigned to a canvas: ${(canvas.name || 'Untitled').trim() || 'Untitled'}`,
+              p_related_id: subtaskId,
+              p_related_type: 'subtask',
+              p_actor_id: user.id,
+            });
+          }
+        }
+      }
       setCanvases(next);
       void persistCanvases(next);
     },
@@ -111,7 +134,7 @@ export function CanvasContent({
       setCanvases(next);
       void persistCanvases(next);
     },
-    [canvases, persistCanvases]
+    [canvases, persistCanvases, subtaskId, user]
   );
 
   const handleCloseEditor = useCallback(() => {
@@ -125,15 +148,22 @@ export function CanvasContent({
     [user, canDeleteContent]
   );
 
-  const handleDeleteCanvas = useCallback(
+  const handleRequestDeleteCanvas = useCallback(
     (canvas: CanvasItem) => {
       if (!canDeleteCanvas(canvas)) return;
-      if (editingCanvasId === canvas.id) setEditingCanvasId(null);
-      const next = canvases.filter((c) => c.id !== canvas.id);
-      handleCanvasesChange(next);
+      setPendingDeleteCanvas(canvas);
     },
-    [canvases, editingCanvasId, handleCanvasesChange, canDeleteCanvas]
+    [canDeleteCanvas]
   );
+
+  const handleConfirmDeleteCanvas = useCallback(() => {
+    if (!pendingDeleteCanvas) return;
+    const canvas = pendingDeleteCanvas;
+    setPendingDeleteCanvas(null);
+    if (editingCanvasId === canvas.id) setEditingCanvasId(null);
+    const next = canvases.filter((c) => c.id !== canvas.id);
+    handleCanvasesChange(next);
+  }, [pendingDeleteCanvas, canvases, editingCanvasId, handleCanvasesChange]);
 
   const createCanvas = useCallback(
     (name: string, description?: string, assigned_to?: string | null) =>
@@ -148,10 +178,23 @@ export function CanvasContent({
         assignablePeople={assignablePeople}
         onCanvasesChange={handleCanvasesChange}
         onOpenCanvas={handleOpenCanvas}
-        onDeleteCanvas={handleDeleteCanvas}
+        onDeleteCanvas={handleRequestDeleteCanvas}
         canDeleteCanvas={canDeleteCanvas}
         createCanvas={createCanvas}
       />
+
+      {pendingDeleteCanvas && (
+        <ConfirmDialog
+          open={!!pendingDeleteCanvas}
+          onConfirm={handleConfirmDeleteCanvas}
+          onCancel={() => setPendingDeleteCanvas(null)}
+          title={`Usunąć ${pendingDeleteCanvas.name || 'Canvas'}?`}
+          message="Ta operacja jest nieodwracalna. Wszystkie bloki i dane zostaną trwale usunięte."
+          confirmLabel="Usuń"
+          cancelLabel="Anuluj"
+          variant="danger"
+        />
+      )}
 
       {editingCanvas && createPortal(
         <CanvasEditorPopup

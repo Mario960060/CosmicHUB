@@ -115,6 +115,19 @@ export function sumEstimatedHours(
 }
 
 /**
+ * Sum estimated hours from minitasks (asteroids)
+ */
+export function sumMinitaskEstimatedHours(
+  minitasks: { estimated_hours: number | null }[]
+): number | null {
+  const values = minitasks
+    .map((m) => m.estimated_hours)
+    .filter((h): h is number => h !== null && h !== undefined);
+  if (values.length === 0) return null;
+  return values.reduce((acc, h) => acc + h, 0);
+}
+
+/**
  * Sum logged hours from work logs (subtask-level)
  */
 export function sumLoggedHours(

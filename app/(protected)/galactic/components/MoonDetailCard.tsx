@@ -22,6 +22,7 @@ import {
   calculateDaysRemaining,
   getDueDateStyle,
   countSubtasksByStatus,
+  sumMinitaskEstimatedHours,
 } from '@/lib/galactic/progress';
 
 interface MoonDetailCardProps {
@@ -58,25 +59,29 @@ function useMoonDetails(taskId: string | null) {
   return useQuery({
     queryKey: ['moon-details', taskId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('tasks')
-        .select(
+      const [taskRes, minitasksRes] = await Promise.all([
+        supabase
+          .from('tasks')
+          .select(
+            `
+            *,
+            module:modules (id, project_id),
+            subtasks (
+              id,
+              name,
+              status,
+              assigned_to,
+              work_logs (hours_spent)
+            )
           `
-          *,
-          module:modules (id, project_id),
-          subtasks (
-            id,
-            name,
-            status,
-            assigned_to,
-            work_logs (hours_spent)
           )
-        `
-        )
-        .eq('id', taskId!)
-        .single();
-      if (error) throw error;
-      return data as TaskWithSubtasks;
+          .eq('id', taskId!)
+          .single(),
+        supabase.from('minitasks').select('id, estimated_hours').eq('task_id', taskId!),
+      ]);
+      if (taskRes.error) throw taskRes.error;
+      const data = { ...taskRes.data, minitasks: minitasksRes.data || [] } as TaskWithSubtasks & { minitasks: { id: string; estimated_hours: number | null }[] };
+      return data;
     },
     enabled: !!taskId,
   });
@@ -110,7 +115,6 @@ export function MoonDetailCard({ taskId, onClose, onZoomIn }: MoonDetailCardProp
   if (isLoading || !data) {
     return (
       <div
-        onClick={onClose}
         style={{
           position: 'fixed',
           inset: 0,
@@ -139,7 +143,9 @@ export function MoonDetailCard({ taskId, onClose, onZoomIn }: MoonDetailCardProp
     const logs = st.work_logs || [];
     return acc + logs.reduce((lacc, l) => lacc + (l.hours_spent || 0), 0);
   }, 0);
-  const estimated = data.estimated_hours ?? null;
+  const minitasks = (data as { minitasks?: { estimated_hours: number | null }[] }).minitasks ?? [];
+  const estimatedFromMinitasks = data.estimated_hours == null ? sumMinitaskEstimatedHours(minitasks) : null;
+  const estimated = data.estimated_hours ?? estimatedFromMinitasks;
   const hoursDisplay =
     estimated !== null
       ? `${Math.round(loggedTotal * 10) / 10}h / ${estimated}h`
@@ -150,7 +156,6 @@ export function MoonDetailCard({ taskId, onClose, onZoomIn }: MoonDetailCardProp
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,

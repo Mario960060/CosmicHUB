@@ -151,7 +151,6 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
     <>
       {/* Backdrop */}
       <div 
-        onClick={handleClose}
         style={{
           position: 'fixed',
           inset: 0,

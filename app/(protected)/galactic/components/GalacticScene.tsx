@@ -16,6 +16,7 @@ interface GalacticSceneProps {
   viewType: 'galaxy' | 'solar-system' | 'module-zoom' | 'task-zoom' | 'minitask-zoom';
   onObjectClick?: (object: CanvasObject) => void;
   onObjectContextMenu?: (object: CanvasObject, e: React.MouseEvent) => void;
+  onDependencyContextMenu?: (dep: Dependency, e: React.MouseEvent) => void;
   onPortalClick?: (moduleId: string) => void;
   onTaskPortalClick?: (taskId: string) => void;
   onMinitaskPortalClick?: (minitaskId: string) => void;
@@ -96,11 +97,18 @@ function getAuraGradient(color: string, sizePercent: number, parentSizePx: numbe
 }
 
 function renderStarsCrown(stars: number, size: 'sm' | 'md' = 'md') {
-  const count = Math.min(3, Math.max(0, Math.round(stars)));
+  const clamped = Math.min(3, Math.max(0, stars));
+  const fullStars = Math.floor(clamped);
+  const hasHalf = clamped % 1 >= 0.5;
   const starSize = size === 'sm' ? 10 : 14;
   return (
     <div className="object-stars-crown" style={{ fontSize: starSize }}>
-      {'★'.repeat(count)}
+      {'★'.repeat(fullStars)}
+      {hasHalf && (
+        <span className="star-half" style={{ display: 'inline-block', width: '0.5em', overflow: 'hidden', verticalAlign: 'inherit' }}>
+          ★
+        </span>
+      )}
     </div>
   );
 }
@@ -111,6 +119,7 @@ export function GalacticScene({
   viewType,
   onObjectClick,
   onObjectContextMenu,
+  onDependencyContextMenu,
   onPortalClick,
   onTaskPortalClick,
   onMinitaskPortalClick,
@@ -546,19 +555,43 @@ export function GalacticScene({
     };
 
     const position = pos(obj);
-    const transform = isMini
-      ? 'translate(-50%, -50%) scale(0.55)'
+    const isModuleZoom = viewType === 'module-zoom';
+    const satelliteScale = isModuleZoom ? (isMini ? 0.16 : 0.275) : (isMini ? 0.55 : 1);
+    const useScaleWrapper = isModuleZoom && satelliteScale !== 1;
+    const transform = !useScaleWrapper && satelliteScale !== 1
+      ? `translate(-50%, -50%) scale(${satelliteScale})`
       : 'translate(-50%, -50%)';
+    const elementCount = typeof obj.metadata?.elementCount === 'number' ? obj.metadata.elementCount : 0;
+    const renderSatelliteBadge = () => {
+      if (elementCount > 0) {
+        return <div className="object-stars-crown" style={{ fontSize: isMini ? 10 : 12 }}>{elementCount}</div>;
+      }
+      return null;
+    };
+    const satelliteContent = (
+      <>
+        {renderSatelliteContent()}
+        {renderSatelliteBadge()}
+        {obj.metadata?.isBlocked && <div className="blocked-badge">!</div>}
+        {obj.metadata?.isComplete && <div className="complete-badge">✓</div>}
+      </>
+    );
+    // When useScaleWrapper: inner div has position:absolute so outer collapses to 0×0 → outline draws around a point.
+    // Give outer explicit size so selection outline renders correctly on all satellites.
+    const wrapperSize = useScaleWrapper ? { width: 52, height: 58 } : undefined;
     return (
       <div
         key={obj.id}
         data-galactic-object
         data-object-id={obj.id}
-        className={`${type}${isMini ? ' sm' : ''}`}
+        className={!useScaleWrapper ? `${type}${isMini ? ' sm' : ''}` : undefined}
         style={{
+          position: 'absolute',
           left: `${position.x}px`,
           top: `${position.y}px`,
-          transform,
+          transform: useScaleWrapper ? `translate(-50%, -50%) scale(${satelliteScale})` : transform,
+          transformOrigin: 'center center',
+          ...wrapperSize,
           ...(isSelected(obj.id) ? SELECTION_OUTLINE : {}),
         }}
         onClick={() => handleObjectClick(obj)}
@@ -569,14 +602,12 @@ export function GalacticScene({
         onMouseEnter={() => setHoveredObject(obj.id)}
         onMouseLeave={() => setHoveredObject(null)}
       >
-        {renderSatelliteContent()}
-        {!isMini && !obj.metadata?.hideName && <div className="sat-name-label">{obj.name}</div>}
-        
-        {obj.metadata?.isBlocked && (
-          <div className="blocked-badge">!</div>
-        )}
-        {obj.metadata?.isComplete && (
-          <div className="complete-badge">✓</div>
+        {useScaleWrapper ? (
+          <div className={`${type}${isMini ? ' sm' : ''}`}>
+            {satelliteContent}
+          </div>
+        ) : (
+          satelliteContent
         )}
       </div>
     );
@@ -663,13 +694,16 @@ export function GalacticScene({
   const renderAsteroid = (obj: CanvasObject) => {
     const type = (obj.metadata?.asteroidType || 'rocky').toLowerCase();
     const isMini = obj.metadata?.isMiniature === true;
+    const isSolarSystemMini = obj.metadata?.isSolarSystemMini === true;
+    const isModuleZoom = viewType === 'module-zoom';
+    const sizeClass = isSolarSystemMini ? ' xs' : isMini && isModuleZoom ? ' md' : isMini ? ' sm' : '';
 
     return (
       <div
         key={obj.id}
         data-galactic-object
         data-object-id={obj.id}
-        className={`asteroid ${type}${isMini ? ' sm' : ''}`}
+        className={`asteroid ${type}${sizeClass}`}
         style={{
           left: `${pos(obj).x}px`,
           top: `${pos(obj).y}px`,
@@ -714,9 +748,9 @@ export function GalacticScene({
         })()}
         {renderStarsCrown(obj.metadata?.priorityStars ?? 1, isMini ? 'sm' : 'md')}
         <div className="asteroid-labels-inset">
-          {!isMini && (
-            <div className="asteroid-name-label">{obj.name}</div>
-          )}
+          <div className="asteroid-name-label" style={{ fontSize: isMini ? '7px' : '10px' }}>
+            {obj.name}
+          </div>
           {obj.metadata?.dueDateDays !== undefined && obj.metadata?.dueDateDays !== null && (
             <div className="asteroid-deadline-label" style={{ fontSize: isMini ? '7px' : '10px' }}>
               {formatDeadlineDays(obj.metadata.dueDateDays)}
@@ -790,11 +824,13 @@ export function GalacticScene({
     );
   };
 
-  // Render module-to-task hierarchy links (solar system only) - cienkie szare linie
+  // Render module-to-task and task-to-minitask hierarchy links (solar system only) - cienkie szare linie
   const renderModuleTaskLinks = () => {
     if (viewType !== 'solar-system') return null;
     const tasks = objects.filter((o) => o.type === 'task');
-    if (tasks.length === 0) return null;
+    const minitasks = objects.filter((o) => o.type === 'minitask' && o.metadata?.taskId);
+    const hasLinks = tasks.length > 0 || minitasks.length > 0;
+    if (!hasLinks) return null;
 
     return (
       <svg
@@ -828,18 +864,65 @@ export function GalacticScene({
             />
           );
         })}
+        {minitasks.map((minitask) => {
+          const taskId = minitask.metadata?.taskId;
+          if (!taskId) return null;
+          const task = objects.find((o) => o.type === 'task' && o.id === taskId);
+          if (!task) return null;
+          const from = pos(task);
+          const to = pos(minitask);
+          return (
+            <line
+              key={`task-minitask-${minitask.id}`}
+              x1={from.x}
+              y1={from.y}
+              x2={to.x}
+              y2={to.y}
+              stroke="rgba(150, 150, 150, 0.25)"
+              strokeWidth={1}
+              strokeDasharray="3 2"
+            />
+          );
+        })}
       </svg>
     );
   };
 
   // Render task-to-asteroid/satellite hierarchy links (module-zoom) - gray dashed lines
+  // Minitasks: line from task (moon) to minitask (asteroid)
+  // Subtasks with minitaskId: line from minitask (asteroid) to subtask (satellite) – created in asteroid system
+  // Subtasks without minitaskId: line from task (moon) to subtask
   const renderTaskChildLinks = () => {
     if (viewType !== 'module-zoom') return null;
-    const tasks = objects.filter((o) => o.type === 'task');
     const minitasks = objects.filter((o) => o.type === 'minitask');
     const subtasks = objects.filter((o) => o.type === 'subtask');
-    const children = [...minitasks, ...subtasks];
-    if (children.length === 0) return null;
+    const lines: { key: string; from: { x: number; y: number }; to: { x: number; y: number } }[] = [];
+
+    minitasks.forEach((minitask) => {
+      const taskId = minitask.metadata?.taskId;
+      if (!taskId) return;
+      const task = objects.find((o) => o.type === 'task' && o.id === taskId);
+      if (!task) return;
+      lines.push({ key: `task-minitask-${minitask.id}`, from: pos(task), to: pos(minitask) });
+    });
+
+    subtasks.forEach((subtask) => {
+      const minitaskId = subtask.metadata?.minitaskId;
+      if (minitaskId) {
+        const asteroid = objects.find((o) => o.type === 'minitask' && o.id === minitaskId);
+        if (asteroid) {
+          lines.push({ key: `asteroid-sub-${subtask.id}`, from: pos(asteroid), to: pos(subtask) });
+        }
+      } else {
+        const taskId = subtask.metadata?.taskId;
+        if (!taskId) return;
+        const task = objects.find((o) => o.type === 'task' && o.id === taskId);
+        if (!task) return;
+        lines.push({ key: `task-sub-${subtask.id}`, from: pos(task), to: pos(subtask) });
+      }
+    });
+
+    if (lines.length === 0) return null;
 
     return (
       <svg
@@ -853,26 +936,18 @@ export function GalacticScene({
           zIndex: 5,
         }}
       >
-        {children.map((child) => {
-          const taskId = child.metadata?.taskId;
-          if (!taskId) return null;
-          const task = objects.find((o) => o.type === 'task' && o.id === taskId);
-          if (!task) return null;
-          const from = pos(task);
-          const to = pos(child);
-          return (
-            <line
-              key={`task-child-${child.id}`}
-              x1={from.x}
-              y1={from.y}
-              x2={to.x}
-              y2={to.y}
-              stroke="rgba(150, 150, 150, 0.35)"
-              strokeWidth={1}
-              strokeDasharray="4 3"
-            />
-          );
-        })}
+        {lines.map(({ key, from, to }) => (
+          <line
+            key={key}
+            x1={from.x}
+            y1={from.y}
+            x2={to.x}
+            y2={to.y}
+            stroke="rgba(150, 150, 150, 0.35)"
+            strokeWidth={1}
+            strokeDasharray="4 3"
+          />
+        ))}
       </svg>
     );
   };
@@ -938,7 +1013,7 @@ export function GalacticScene({
           width: '100%',
           height: '100%',
           pointerEvents: 'none',
-          zIndex: 5,
+          zIndex: 11,
         }}
       >
         <defs>
@@ -1015,7 +1090,26 @@ export function GalacticScene({
           }
           
           return (
-            <g key={`dep-${index}`}>
+            <g
+              key={`dep-${dep.id ?? index}`}
+              style={{ cursor: onDependencyContextMenu ? 'context-menu' : undefined, pointerEvents: onDependencyContextMenu ? 'stroke' : 'none' }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDependencyContextMenu?.(dep, e);
+              }}
+            >
+              {/* Invisible wide stroke for easier hit detection */}
+              {onDependencyContextMenu && (
+                <line
+                  x1={from.x}
+                  y1={from.y}
+                  x2={to.x}
+                  y2={to.y}
+                  stroke="transparent"
+                  strokeWidth={16}
+                />
+              )}
               <line
                 className={className}
                 x1={from.x}
@@ -1027,6 +1121,7 @@ export function GalacticScene({
                 strokeDasharray={dashArray}
                 opacity={opacity}
                 filter={filter}
+                style={{ pointerEvents: 'none' }}
               />
             </g>
           );
@@ -1084,6 +1179,7 @@ export function GalacticScene({
         ref={canvasRef}
         data-galaxy-canvas
         id="galaxy-canvas"
+        className={viewType === 'task-zoom' ? 'task-zoom-view' : undefined}
         style={{
           width: CANVAS_WIDTH,
           height: CANVAS_HEIGHT,
@@ -1109,13 +1205,19 @@ export function GalacticScene({
         {renderTaskChildLinks()}
         {/* Asteroid-subtask hierarchy links (task-zoom) */}
         {renderAsteroidSubtaskLinks()}
-        {/* Dependencies (module-zoom and task-zoom) */}
-        {(viewType === 'module-zoom' || viewType === 'task-zoom') && renderDependencies()}
-
-        {/* Celestial Objects */}
+        {/* Celestial Objects - render selected last so their outlines aren't hidden behind others */}
         <div style={{ position: 'relative', zIndex: 10 }}>
-          {objects.map((obj, index) => renderObject(obj, index))}
+          {[...objects]
+            .sort((a, b) => {
+              const aSel = selectedObjectIds?.has(a.id) ?? false;
+              const bSel = selectedObjectIds?.has(b.id) ?? false;
+              return aSel === bSel ? 0 : aSel ? 1 : -1;
+            })
+            .map((obj, index) => renderObject(obj, index))}
         </div>
+
+        {/* Dependencies (module-zoom and task-zoom) - rendered on top for right-click */}
+        {(viewType === 'module-zoom' || viewType === 'task-zoom') && renderDependencies()}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -41,6 +42,175 @@ body {
 @keyframes gridMove {
   0% { transform: translateY(0px); }
   100% { transform: translateY(50px); }
+}
+
+@keyframes noteEditorPopIn {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Note editor popup – rich text content styles */
+.note-content-editable:empty::before {
+  content: attr(data-placeholder);
+  color: rgba(255,255,255,0.12);
+  font-style: italic;
+}
+
+.note-content-editable ::selection,
+.note-content-editable *::selection {
+  background: rgba(129,140,248,0.25);
+  color: #fff;
+}
+
+.note-content-editable h1 {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: #a5b4fc;
+  margin: 24px 0 10px;
+}
+
+.note-content-editable h2 {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: #818cf8;
+  margin: 20px 0 8px;
+}
+
+.note-content-editable h3 {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(129,140,248,0.7);
+  margin: 16px 0 6px;
+}
+
+.note-content-editable p {
+  margin-bottom: 12px;
+}
+
+.note-content-editable strong {
+  color: rgba(255,255,255,0.95);
+  font-weight: 600;
+}
+
+.note-content-editable em {
+  color: rgba(255,255,255,0.65);
+  font-style: italic;
+}
+
+.note-content-editable u {
+  text-decoration-color: rgba(129,140,248,0.4);
+  text-underline-offset: 3px;
+}
+
+.note-content-editable s {
+  color: rgba(255,255,255,0.3);
+}
+
+.note-content-editable ul,
+.note-content-editable ol {
+  padding-left: 22px;
+  margin-bottom: 12px;
+}
+
+.note-content-editable li {
+  margin-bottom: 4px;
+}
+
+.note-content-editable blockquote {
+  border-left: 3px solid rgba(129,140,248,0.3);
+  padding-left: 16px;
+  margin: 12px 0;
+  color: rgba(255,255,255,0.5);
+  font-style: italic;
+}
+
+.note-content-editable code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(129,140,248,0.08);
+  color: #a5b4fc;
+}
+
+.note-content-editable pre {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 14px 18px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(129,140,248,0.08);
+  color: rgba(255,255,255,0.65);
+  margin: 12px 0;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+
+.note-content-editable a {
+  color: #818cf8;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(129,140,248,0.3);
+}
+
+.note-content-editable a:hover {
+  border-bottom-color: #818cf8;
+}
+
+.note-content-editable hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(129,140,248,0.15), transparent);
+  margin: 24px 0;
+}
+
+.note-content-editable .hl-cyan {
+  background: rgba(0,240,255,0.15);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.note-content-editable .hl-rose {
+  background: rgba(244,63,94,0.15);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.note-content-editable .hl-amber {
+  background: rgba(245,158,11,0.15);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.note-content-editable .hl-green {
+  background: rgba(34,197,94,0.15);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.note-content-editable .hl-purple {
+  background: rgba(168,85,247,0.15);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.note-editor-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.note-editor-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.note-editor-body::-webkit-scrollbar-thumb {
+  background: rgba(129,140,248,0.15);
+  border-radius: 3px;
+}
+
+.note-editor-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(129,140,248,0.25);
 }
 
 .animate-pulse {

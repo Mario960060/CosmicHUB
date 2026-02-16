@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { createClient } from '@/lib/supabase/client';
 import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
@@ -12,7 +12,7 @@ interface Idea {
   id: string;
   name: string;
   description?: string;
-  priority: 'low' | 'medium' | 'high';
+  rating: number; // 0.5–3, stars (replaces legacy priority)
   tags: string[];
   status: 'parked' | 'exploring' | 'promoted' | 'discarded';
   assigned_to?: string | null;
@@ -37,23 +37,32 @@ interface IdeasContentProps {
   projectMembers?: ProjectMember[];
 }
 
+function priorityToRating(p: string): number {
+  if (p === 'high') return 3;
+  if (p === 'low') return 1;
+  return 2;
+}
+
 function getIdeas(data: Record<string, unknown>): Idea[] {
   const raw = data.ideas;
   if (!Array.isArray(raw)) return [];
-  return raw.map((i: any) => ({
-    id: i.id || crypto.randomUUID(),
-    name: i.name ?? i.text ?? '',
-    description: i.description ?? '',
-    priority: i.priority || 'medium',
-    tags: Array.isArray(i.tags) ? i.tags : [],
-    status: i.status || 'parked',
-    assigned_to: i.assigned_to,
-    promoted_to: i.promoted_to,
-    promote_count: i.promote_count ?? 0,
-    promoted_by: Array.isArray(i.promoted_by) ? i.promoted_by : [],
-    created_by: i.created_by,
-    created_at: i.created_at || new Date().toISOString(),
-  }));
+  return raw.map((i: any) => {
+    const hasRating = typeof i.rating === 'number' && i.rating >= 0.5 && i.rating <= 3;
+    return {
+      id: i.id || crypto.randomUUID(),
+      name: i.name ?? i.text ?? '',
+      description: i.description ?? '',
+      rating: hasRating ? i.rating : priorityToRating(i.priority || 'medium'),
+      tags: Array.isArray(i.tags) ? i.tags : [],
+      status: i.status || 'parked',
+      assigned_to: i.assigned_to,
+      promoted_to: i.promoted_to,
+      promote_count: i.promote_count ?? 0,
+      promoted_by: Array.isArray(i.promoted_by) ? i.promoted_by : [],
+      created_by: i.created_by,
+      created_at: i.created_at || new Date().toISOString(),
+    };
+  });
 }
 
 export function IdeasContent({
@@ -68,11 +77,11 @@ export function IdeasContent({
   const invalidate = useInvalidateSatelliteQueries();
   const [ideas, setIdeas] = useState<Idea[]>(() => getIdeas(satelliteData));
   const [filter, setFilter] = useState<'all' | 'parked' | 'exploring' | 'promoted' | 'discarded'>(
-    'parked'
+    'all'
   );
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
-  const [newPriority, setNewPriority] = useState<Idea['priority']>('medium');
+  const [newRating, setNewRating] = useState<number>(2);
   const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [descriptionPopupId, setDescriptionPopupId] = useState<string | null>(null);
@@ -80,6 +89,18 @@ export function IdeasContent({
   useEffect(() => {
     setIdeas(getIdeas(satelliteData));
   }, [subtaskId, satelliteData]);
+
+  // Close 3-dot menu on click outside
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      const el = e.target as Element;
+      if (el?.closest?.('[data-ideas-menu-trigger]') || el?.closest?.('[data-ideas-menu]')) return;
+      setMenuOpen(null);
+    };
+    document.addEventListener('click', handleClick, true);
+    return () => document.removeEventListener('click', handleClick, true);
+  }, [menuOpen]);
 
   const save = async (
     nextIdeas: Idea[],
@@ -104,7 +125,7 @@ export function IdeasContent({
       id: crypto.randomUUID(),
       name: newName.trim(),
       description: newDescription.trim() || undefined,
-      priority: newPriority,
+      rating: newRating,
       tags: [],
       status: 'parked',
       promote_count: 0,
@@ -116,6 +137,12 @@ export function IdeasContent({
     save(next, { user_id: user.id, action: 'added_idea', detail: idea.name, actor_name: user.full_name });
     setNewName('');
     setNewDescription('');
+  };
+
+  const setIdeaRating = (id: string, rating: number) => {
+    const idea = ideas.find((i) => i.id === id);
+    const next = ideas.map((i) => (i.id === id ? { ...i, rating } : i));
+    save(next, { user_id: user!.id, action: 'updated_idea_rating', detail: `${idea?.name ?? ''} → ${rating}★`, actor_name: user!.full_name });
   };
 
   const setIdeaStatus = (id: string, status: Idea['status']) => {
@@ -162,15 +189,42 @@ export function IdeasContent({
       return tb - ta;
     });
 
-  const priorityColor = (p: Idea['priority']) => {
-    switch (p) {
-      case 'high':
-        return '#ef4444';
-      case 'low':
-        return 'rgba(255,255,255,0.4)';
-      default:
-        return '#fbbf24';
+  const renderRatingStars = (rating: number, onClick?: (r: number) => void) => {
+    const r = Math.min(3, Math.max(0.5, rating));
+    const full = Math.floor(r);
+    const half = r % 1 >= 0.5 ? 1 : 0;
+    const stars = [];
+    for (let i = 0; i < full; i++) stars.push('★');
+    if (half) stars.push('½');
+    const display = stars.join('') || '☆';
+    if (onClick) {
+      return (
+        <div style={{ display: 'flex', gap: 2, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+          {[1, 2, 3].map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => onClick(v)}
+              style={{
+                padding: 2,
+                background: 'none',
+                border: 'none',
+                color: r >= v ? '#fbbf24' : 'rgba(255,255,255,0.3)',
+                cursor: 'pointer',
+                fontSize: 14,
+              }}
+            >
+              ★
+            </button>
+          ))}
+        </div>
+      );
     }
+    return (
+      <span style={{ color: '#fbbf24', fontSize: 12 }}>
+        {display}
+      </span>
+    );
   };
 
   return (
@@ -222,26 +276,26 @@ export function IdeasContent({
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>
-            <span>Priority:</span>
-            {(['low', 'medium', 'high'] as const).map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setNewPriority(p)}
-                style={{
-                  padding: '4px 10px',
-                  background: newPriority === p ? 'rgba(168, 85, 247, 0.3)' : 'rgba(0, 0, 0, 0.3)',
-                  border: `1px solid ${newPriority === p ? '#a855f7' : 'rgba(255,255,255,0.2)'}`,
-                  borderRadius: '6px',
-                  color: newPriority === p ? '#a855f7' : 'rgba(255,255,255,0.7)',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                }}
-              >
-                {p.charAt(0).toUpperCase() + p.slice(1)}
-              </button>
-            ))}
+            <span>Rating:</span>
+            <input
+              type="number"
+              value={newRating}
+              onChange={(e) => setNewRating(Math.min(3, Math.max(0.5, parseFloat(e.target.value) || 1)))}
+              min={0.5}
+              max={3}
+              step={0.5}
+              style={{
+                width: 56,
+                padding: '4px 8px',
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '6px',
+                color: '#fff',
+                fontSize: '12px',
+                outline: 'none',
+              }}
+            />
+            <span style={{ color: 'rgba(255,255,255,0.5)' }}>★</span>
           </div>
           <button
             type="button"
@@ -267,7 +321,7 @@ export function IdeasContent({
       </div>
 
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-        {(['parked', 'exploring', 'promoted', 'discarded', 'all'] as const).map((f) => (
+        {(['all', 'parked', 'exploring', 'promoted', 'discarded'] as const).map((f) => (
           <button
             key={f}
             type="button"
@@ -349,18 +403,7 @@ export function IdeasContent({
                   )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                  <span
-                    style={{
-                      padding: '4px 8px',
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      background: `${priorityColor(idea.priority)}22`,
-                      color: priorityColor(idea.priority),
-                      borderRadius: '8px',
-                    }}
-                  >
-                    {idea.priority}
-                  </span>
+                  {renderRatingStars(idea.rating, (r) => setIdeaRating(idea.id, r))}
                   {projectMembers.length > 0 && (
                     <div onClick={(e) => e.stopPropagation()}>
                       <CosmicDropdown
@@ -380,6 +423,7 @@ export function IdeasContent({
                   <div style={{ position: 'relative' }}>
                     <button
                       type="button"
+                      data-ideas-menu-trigger
                       onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === idea.id ? null : idea.id); }}
                       style={{
                         padding: '4px',
@@ -393,6 +437,8 @@ export function IdeasContent({
                     </button>
                     {menuOpen === idea.id && (
                       <div
+                        data-ideas-menu
+                        onClick={(e) => e.stopPropagation()}
                         style={{
                           position: 'absolute',
                           top: '100%',

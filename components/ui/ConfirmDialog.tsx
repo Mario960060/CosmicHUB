@@ -2,7 +2,7 @@
 
 import { Fragment, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Dialog as HeadlessDialog, Transition } from '@headlessui/react';
-import { AlertTriangle, Trash2, Info, X } from 'lucide-react';
+import { AlertTriangle, Info } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
 /* -------------------------------------------------------------------------- */
@@ -22,34 +22,41 @@ export interface ConfirmDialogProps {
   variant?: ConfirmVariant;
 }
 
+/* Warning triangle SVG (matches user design) */
+const WarnIconSvg = () => (
+  <svg viewBox="0 0 24 24" style={{ width: 22, height: 22, stroke: '#f43f5e', fill: 'none', strokeWidth: 2 }}>
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
 /* -------------------------------------------------------------------------- */
 /*  Component                                                                 */
 /* -------------------------------------------------------------------------- */
 
 const variantConfig: Record<
   ConfirmVariant,
-  { icon: ReactNode; iconBg: string; confirmBg: string; confirmHover: string; glow: string }
+  {
+    icon: ReactNode;
+    accentColor: string;
+    confirmLabel: string;
+  }
 > = {
   danger: {
-    icon: <Trash2 className="w-6 h-6 text-red-400" />,
-    iconBg: 'bg-red-500/10 border-red-500/30',
-    confirmBg: 'bg-red-600 hover:bg-red-500',
-    confirmHover: 'hover:shadow-[0_0_20px_rgba(239,68,68,0.4)]',
-    glow: 'shadow-[0_0_60px_rgba(239,68,68,0.15)]',
+    icon: <WarnIconSvg />,
+    accentColor: '#f43f5e',
+    confirmLabel: 'Usuń',
   },
   warning: {
-    icon: <AlertTriangle className="w-6 h-6 text-amber-400" />,
-    iconBg: 'bg-amber-500/10 border-amber-500/30',
-    confirmBg: 'bg-amber-600 hover:bg-amber-500',
-    confirmHover: 'hover:shadow-[0_0_20px_rgba(245,158,11,0.4)]',
-    glow: 'shadow-[0_0_60px_rgba(245,158,11,0.15)]',
+    icon: <AlertTriangle className="w-[22px] h-[22px]" style={{ color: '#f59e0b' }} />,
+    accentColor: '#f59e0b',
+    confirmLabel: 'Potwierdź',
   },
   info: {
-    icon: <Info className="w-6 h-6 text-cyan-400" />,
-    iconBg: 'bg-cyan-500/10 border-cyan-500/30',
-    confirmBg: 'bg-cyan-600 hover:bg-cyan-500',
-    confirmHover: 'hover:shadow-[0_0_20px_rgba(0,217,255,0.4)]',
-    glow: 'shadow-[0_0_60px_rgba(0,217,255,0.15)]',
+    icon: <Info className="w-[22px] h-[22px]" style={{ color: '#00d9ff' }} />,
+    accentColor: '#00d9ff',
+    confirmLabel: 'Potwierdź',
   },
 };
 
@@ -59,12 +66,14 @@ export const ConfirmDialog = ({
   onCancel,
   title = 'Potwierdzenie',
   message = 'Czy na pewno chcesz kontynuować?',
-  confirmLabel = 'Potwierdź',
+  confirmLabel,
   cancelLabel = 'Anuluj',
   variant = 'danger',
 }: ConfirmDialogProps) => {
   const [mounted, setMounted] = useState(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cfg = variantConfig[variant];
+  const effectiveConfirmLabel = confirmLabel ?? cfg.confirmLabel;
 
   useEffect(() => {
     setMounted(true);
@@ -81,7 +90,8 @@ export const ConfirmDialog = ({
   const modalRoot = document.getElementById('modal-root');
   if (!modalRoot) return null;
 
-  const cfg = variantConfig[variant];
+  const accent = cfg.accentColor;
+  const accentRgb = accent === '#f43f5e' ? '244,63,94' : accent === '#f59e0b' ? '245,158,11' : '0,217,255';
 
   const content = (
     <Transition appear show={open} as={Fragment}>
@@ -102,12 +112,11 @@ export const ConfirmDialog = ({
           leaveTo="opacity-0"
         >
           <div
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm"
             style={{
-              backgroundColor: 'rgba(0, 0, 0, 0.80)',
-              backdropFilter: 'blur(4px)',
               position: 'fixed',
               inset: 0,
+              background: 'rgba(3,6,14,0.85)',
+              backdropFilter: 'blur(8px)',
               zIndex: 99998,
             }}
           />
@@ -115,59 +124,127 @@ export const ConfirmDialog = ({
 
         {/* Panel */}
         <div
-          className="fixed inset-0 overflow-y-auto"
           style={{ position: 'fixed', inset: 0, overflowY: 'auto', zIndex: 99999 }}
         >
           <div className="flex min-h-full items-center justify-center p-4">
             <Transition.Child
               as={Fragment}
               enter="ease-out duration-200"
-              enterFrom="opacity-0 scale-90"
+              enterFrom="opacity-0 scale-95"
               enterTo="opacity-100 scale-100"
               leave="ease-in duration-150"
               leaveFrom="opacity-100 scale-100"
-              leaveTo="opacity-0 scale-90"
+              leaveTo="opacity-0 scale-95"
             >
               <HeadlessDialog.Panel
-                className={`w-full max-w-sm transform rounded-xl border border-primary/20 bg-[#0a0e1a] p-0 text-left shadow-2xl transition-all ${cfg.glow}`}
+                style={{
+                  width: 400,
+                  maxWidth: 'min(400px, 90vw)',
+                  background: `radial-gradient(ellipse at 50% 0%, rgba(${accentRgb},0.04) 0%, transparent 50%), #0a1628`,
+                  border: `1px solid rgba(${accentRgb},0.2)`,
+                  borderRadius: 16,
+                  overflow: 'hidden',
+                  boxShadow: `0 0 60px rgba(${accentRgb},0.06), 0 25px 50px rgba(0,0,0,0.5), inset 0 1px 0 rgba(${accentRgb},0.06)`,
+                  animation: 'confirmDialogIn 0.2s ease-out',
+                }}
               >
-                {/* Close button */}
-                <button
-                  type="button"
-                  onClick={onCancel}
-                  className="absolute top-3 right-3 text-foreground/40 hover:text-foreground/70 transition-colors z-10"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <style>{`
+                  @keyframes confirmDialogIn {
+                    from { opacity: 0; transform: scale(0.95) translateY(8px); }
+                    to { opacity: 1; transform: scale(1) translateY(0); }
+                  }
+                `}</style>
 
-                <div className="px-6 pt-6 pb-2 flex flex-col items-center text-center">
-                  {/* Icon */}
+                <div
+                  style={{
+                    padding: '28px 28px 20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    textAlign: 'center',
+                  }}
+                >
+                  {/* Warning icon */}
                   <div
-                    className={`w-14 h-14 rounded-full border flex items-center justify-center mb-4 ${cfg.iconBg}`}
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: '50%',
+                      background: `rgba(${accentRgb},0.08)`,
+                      border: `1px solid rgba(${accentRgb},0.15)`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginBottom: 18,
+                      position: 'relative',
+                    }}
                   >
                     {cfg.icon}
                   </div>
 
-                  {/* Title */}
                   <HeadlessDialog.Title
                     as="h3"
-                    className="text-lg font-semibold text-foreground mb-2"
+                    style={{
+                      fontFamily: 'Rajdhani, sans-serif',
+                      fontSize: 17,
+                      fontWeight: 700,
+                      color: 'rgba(255,255,255,0.9)',
+                      marginBottom: 8,
+                      letterSpacing: 0.3,
+                    }}
                   >
                     {title}
                   </HeadlessDialog.Title>
 
-                  {/* Message */}
-                  <div className="text-sm text-foreground/60 leading-relaxed whitespace-pre-line">
+                  <div
+                    style={{
+                      fontFamily: 'Exo 2, sans-serif',
+                      fontSize: 13,
+                      color: 'rgba(255,255,255,0.35)',
+                      lineHeight: 1.5,
+                      maxWidth: 300,
+                      whiteSpace: 'pre-line',
+                    }}
+                  >
                     {message}
                   </div>
                 </div>
 
                 {/* Actions */}
-                <div className="px-6 pb-6 pt-4 flex gap-3">
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 10,
+                    padding: '16px 28px 24px',
+                    justifyContent: 'center',
+                  }}
+                >
                   <button
                     type="button"
                     onClick={onCancel}
-                    className="flex-1 h-10 rounded-lg border border-white/10 bg-white/5 text-sm font-medium text-foreground/70 hover:bg-white/10 hover:text-foreground transition-all"
+                    style={{
+                      padding: '9px 28px',
+                      fontFamily: 'Rajdhani, sans-serif',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      letterSpacing: 0.5,
+                      borderRadius: 8,
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      background: 'rgba(255,255,255,0.03)',
+                      color: 'rgba(255,255,255,0.45)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)';
+                      e.currentTarget.style.color = 'rgba(255,255,255,0.7)';
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                      e.currentTarget.style.color = 'rgba(255,255,255,0.45)';
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+                    }}
                   >
                     {cancelLabel}
                   </button>
@@ -175,9 +252,31 @@ export const ConfirmDialog = ({
                     ref={confirmRef}
                     type="button"
                     onClick={onConfirm}
-                    className={`flex-1 h-10 rounded-lg text-sm font-medium text-white transition-all ${cfg.confirmBg} ${cfg.confirmHover}`}
+                    style={{
+                      padding: '9px 28px',
+                      fontFamily: 'Rajdhani, sans-serif',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      letterSpacing: 0.5,
+                      borderRadius: 8,
+                      border: `1px solid rgba(${accentRgb},0.3)`,
+                      background: `linear-gradient(135deg, rgba(${accentRgb},0.15), rgba(${accentRgb},0.06))`,
+                      color: accent,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = `rgba(${accentRgb},0.5)`;
+                      e.currentTarget.style.background = `linear-gradient(135deg, rgba(${accentRgb},0.25), rgba(${accentRgb},0.12))`;
+                      e.currentTarget.style.boxShadow = `0 0 20px rgba(${accentRgb},0.1)`;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = `rgba(${accentRgb},0.3)`;
+                      e.currentTarget.style.background = `linear-gradient(135deg, rgba(${accentRgb},0.15), rgba(${accentRgb},0.06))`;
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
                   >
-                    {confirmLabel}
+                    {effectiveConfirmLabel}
                   </button>
                 </div>
               </HeadlessDialog.Panel>

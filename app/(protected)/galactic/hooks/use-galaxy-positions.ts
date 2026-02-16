@@ -112,13 +112,13 @@ function posKey(p: { view_context: string; module_id?: string | null; task_id?: 
 
 /** Copy entity position from old context to new context, return merged positions for save */
 export function copyPositionToNewContext(
-  existing: GalaxyPosition[],
+  existing: GalaxyPosition[] | SavePositionPayload[],
   entityType: 'task' | 'minitask',
   entityId: string,
   oldContext: { view_context: 'solar_system' | 'module' | 'task' | 'minitask'; module_id?: string | null; task_id?: string | null; minitask_id?: string | null },
   newContext: { view_context: 'solar_system' | 'module' | 'task' | 'minitask'; module_id?: string | null; task_id?: string | null; minitask_id?: string | null }
 ): SavePositionPayload[] {
-  const p = (x: GalaxyPosition) => ({ ...x, task_id: (x as any).task_id, minitask_id: (x as any).minitask_id });
+  const p = (x: GalaxyPosition | SavePositionPayload) => ({ ...x, task_id: (x as any).task_id, minitask_id: (x as any).minitask_id });
   const merged = new Map<string, SavePositionPayload>();
   for (const pos of existing) {
     merged.set(posKey({ ...p(pos), entity_type: pos.entity_type, entity_id: pos.entity_id }), {
@@ -145,6 +145,22 @@ export function copyPositionToNewContext(
     });
   }
   return Array.from(merged.values());
+}
+
+/** Copy multiple entities' positions to new context */
+export function copyPositionsToNewContext(
+  existing: GalaxyPosition[] | SavePositionPayload[],
+  entityType: 'task' | 'minitask',
+  entityIds: string[],
+  oldContext: { view_context: 'solar_system' | 'module' | 'task' | 'minitask'; module_id?: string | null; task_id?: string | null; minitask_id?: string | null },
+  newContext: { view_context: 'solar_system' | 'module' | 'task' | 'minitask'; module_id?: string | null; task_id?: string | null; minitask_id?: string | null }
+): SavePositionPayload[] {
+  if (entityIds.length === 0) return copyPositionToNewContext(existing, entityType, '', oldContext, newContext);
+  let positions: SavePositionPayload[] = copyPositionToNewContext(existing, entityType, entityIds[0], oldContext, newContext);
+  for (let i = 1; i < entityIds.length; i++) {
+    positions = copyPositionToNewContext(positions, entityType, entityIds[i], oldContext, newContext);
+  }
+  return positions;
 }
 
 export function useSaveGalaxyPositions(projectId: string | null) {

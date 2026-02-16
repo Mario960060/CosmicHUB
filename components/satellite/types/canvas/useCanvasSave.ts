@@ -47,6 +47,7 @@ export function useCanvasSave(
       gridEnabled: state.gridEnabled,
       blocks: state.blocks,
       connections: state.connections,
+      shapes: state.shapes,
     });
     if (payload === lastSavedRef.current) return;
 
@@ -62,6 +63,7 @@ export function useCanvasSave(
       gridEnabled: state.gridEnabled,
       blocks: state.blocks,
       connections: state.connections,
+      shapes: state.shapes,
     };
     const { error } = await saveCanvasInList(subtaskId, canvasData, {
       activityEntry: user
@@ -115,6 +117,7 @@ export function useCanvasSaveLegacy(
         gridEnabled: state.gridEnabled,
         blocks: state.blocks,
         connections: state.connections,
+        shapes: state.shapes,
       },
     });
     if (payload === lastSavedRef.current) return;

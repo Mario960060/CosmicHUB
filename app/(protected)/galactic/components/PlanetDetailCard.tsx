@@ -25,6 +25,7 @@ import {
   getDueDateStyle,
   getAssignedPeople,
   sumEstimatedHours,
+  sumMinitaskEstimatedHours,
   countTasksByStatus,
   calculateTaskProgress,
   sumLoggedHours,
@@ -51,6 +52,7 @@ interface ModuleWithTasks {
     priority_stars?: number;
     progress_percent?: number | null;
     estimated_hours: number | null;
+    minitasks?: { estimated_hours: number | null }[];
     subtasks?: {
       id: string;
       name: string;
@@ -73,15 +75,16 @@ function usePlanetDetails(moduleId: string | null) {
           *,
           tasks (
             *,
-          subtasks (
-            id,
-            name,
-            status,
-            satellite_type,
-            assigned_to,
-            estimated_hours,
-            work_logs (hours_spent)
-          )
+            minitasks (id, estimated_hours),
+            subtasks (
+              id,
+              name,
+              status,
+              satellite_type,
+              assigned_to,
+              estimated_hours,
+              work_logs (hours_spent)
+            )
           )
         `
         )
@@ -176,7 +179,10 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
   const daysRemaining = calculateDaysRemaining(data.due_date);
   const dueStyle = getDueDateStyle(daysRemaining);
   const taskCounts = countTasksByStatus(tasks);
-  const estimatedTotal = (data as { estimated_hours?: number | null }).estimated_hours ?? sumEstimatedHours(tasks);
+  const tasksWithResolvedHours = tasks.map((t) => ({
+    estimated_hours: t.estimated_hours ?? sumMinitaskEstimatedHours(t.minitasks || []),
+  }));
+  const estimatedTotal = (data as { estimated_hours?: number | null }).estimated_hours ?? sumEstimatedHours(tasksWithResolvedHours);
   const avgPriority =
     tasks.length > 0 ? tasks.reduce((s, t) => s + (t.priority_stars ?? 1), 0) / tasks.length : 1;
 
@@ -198,7 +204,6 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -363,6 +368,8 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
                 );
                 const taskAssignedCount = getAssignedPeople((task.subtasks || []) as { assigned_to: string | null }[]).length;
                 const taskStars = task.priority_stars ?? 1;
+                const taskEstimatedHours =
+                  task.estimated_hours ?? sumMinitaskEstimatedHours(task.minitasks || []);
                 return (
                   <div key={task.id} style={{ marginBottom: 8 }}>
                     <button
@@ -389,7 +396,7 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
                         <HierarchyMetaRow
                           progress={taskProgress}
                           loggedHours={taskLoggedHours}
-                          estimatedHours={task.estimated_hours}
+                          estimatedHours={taskEstimatedHours}
                           assignedCount={taskAssignedCount}
                           stars={taskStars}
                           accentColor="#00d9ff"

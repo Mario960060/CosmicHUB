@@ -16,8 +16,7 @@ export type MoveTarget =
 interface MoveToGalaxyDialogProps {
   open: boolean;
   mode: 'task' | 'minitask';
-  entityId: string;
-  entityName: string;
+  entities: { id: string; name: string }[];
   projectId: string;
   projectName?: string;
   currentModuleId?: string;
@@ -73,8 +72,7 @@ function CollapsibleGroup({
 export function MoveToGalaxyDialog({
   open,
   mode,
-  entityId,
-  entityName,
+  entities,
   projectId,
   projectName = 'Projekt',
   currentModuleId,
@@ -144,13 +142,16 @@ export function MoveToGalaxyDialog({
   }, [tasksData, mode, currentTaskId]);
 
   const handleMove = async () => {
-    if (!selectedTarget || isSubmitting) return;
+    if (!selectedTarget || isSubmitting || entities.length === 0) return;
     const targetName = selectedTarget.name;
+    const count = entities.length;
     const confirmed = await confirm({
-      title: 'Przenoszenie elementu',
-      message: mode === 'task'
-        ? `Czy na pewno chcesz przenieść ten task ze wszystkimi przynależnymi mu elementami do "${targetName}"?`
-        : `Czy na pewno chcesz przenieść ten minitask ze wszystkimi satelitami do "${targetName}"?`,
+      title: 'Przenoszenie elementów',
+      message: count > 1
+        ? `Czy na pewno chcesz przenieść ${count} zaznaczonych elementów do "${targetName}"?`
+        : mode === 'task'
+          ? `Czy na pewno chcesz przenieść ten task ze wszystkimi przynależnymi mu elementami do "${targetName}"?`
+          : `Czy na pewno chcesz przenieść ten minitask ze wszystkimi satelitami do "${targetName}"?`,
       confirmLabel: 'Przenieś',
       cancelLabel: 'Anuluj',
       variant: 'warning',
@@ -161,27 +162,31 @@ export function MoveToGalaxyDialog({
     try {
       if (mode === 'task') {
         if (selectedTarget.type !== 'module') return;
-        await updateTask.mutateAsync({
-          taskId: entityId,
-          updates: { module_id: selectedTarget.id },
-        });
+        for (const entity of entities) {
+          await updateTask.mutateAsync({
+            taskId: entity.id,
+            updates: { module_id: selectedTarget.id },
+          });
+        }
         await onSuccess(selectedTarget);
       } else {
-        if (selectedTarget.type === 'module') {
-          await updateMinitask.mutateAsync({
-            minitaskId: entityId,
-            updates: { module_id: selectedTarget.id, task_id: null, project_id: null },
-          });
-        } else if (selectedTarget.type === 'task') {
-          await updateMinitask.mutateAsync({
-            minitaskId: entityId,
-            updates: { task_id: selectedTarget.id, module_id: null, project_id: null },
-          });
-        } else if (selectedTarget.type === 'project') {
-          await updateMinitask.mutateAsync({
-            minitaskId: entityId,
-            updates: { project_id: selectedTarget.id, task_id: null, module_id: null },
-          });
+        for (const entity of entities) {
+          if (selectedTarget.type === 'module') {
+            await updateMinitask.mutateAsync({
+              minitaskId: entity.id,
+              updates: { module_id: selectedTarget.id, task_id: null, project_id: null },
+            });
+          } else if (selectedTarget.type === 'task') {
+            await updateMinitask.mutateAsync({
+              minitaskId: entity.id,
+              updates: { task_id: selectedTarget.id, module_id: null, project_id: null },
+            });
+          } else if (selectedTarget.type === 'project') {
+            await updateMinitask.mutateAsync({
+              minitaskId: entity.id,
+              updates: { project_id: selectedTarget.id, task_id: null, module_id: null },
+            });
+          }
         }
         await onSuccess(selectedTarget);
       }
@@ -227,7 +232,7 @@ export function MoveToGalaxyDialog({
     selectedTarget?.type === t.type && selectedTarget?.id === t.id;
 
   return (
-    <div onClick={onClose} style={modalStyle}>
+    <div style={modalStyle}>
       <div onClick={(e) => e.stopPropagation()} style={contentStyle}>
         <div
           style={{
@@ -282,7 +287,9 @@ export function MoveToGalaxyDialog({
           }}
         >
           <p style={{ color: 'rgba(255,255,255,0.7)', marginBottom: '20px', fontSize: '14px' }}>
-            {entityName}
+            {entities.length > 1
+              ? `${entities.length} elementów${entities.length <= 5 ? `: ${entities.map((e) => e.name).join(', ')}` : ''}`
+              : entities[0]?.name}
           </p>
 
           {mode === 'minitask' && (

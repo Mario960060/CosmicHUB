@@ -52,7 +52,6 @@ export function AddDependencyPopup({
   return (
     <>
       <div
-        onClick={onClose}
         style={{
           position: 'fixed',
           inset: 0,

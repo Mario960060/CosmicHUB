@@ -181,6 +181,7 @@ export function getClosestPortAmongBlocks(
   return best;
 }
 
+
 /** Convert screen coordinates to canvas coordinates */
 export function screenToCanvas(
   clientX: number,

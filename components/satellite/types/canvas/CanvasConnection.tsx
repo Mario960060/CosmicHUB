@@ -1,7 +1,8 @@
 'use client';
 
-import type { CanvasConnection as ConnType, CanvasBlock, LabelFontSize } from './useCanvasState';
+import type { CanvasConnection as ConnType, CanvasBlock, CanvasShape, LabelFontSize } from './useCanvasState';
 import { getPortPosition, computeBezierPath, getArrowAngleForToSide, reverseBezierPath, getBezierTangentAngleAtMid } from './canvas-utils';
+import { getShapePortPosition } from './shape-utils';
 
 const LABEL_FONT_SIZES: Record<LabelFontSize, number> = { sm: 10, md: 16, lg: 20 };
 const HIT_STROKE_WIDTH = 16;
@@ -9,6 +10,7 @@ const HIT_STROKE_WIDTH = 16;
 interface CanvasConnectionProps {
   connection: ConnType;
   blocks: CanvasBlock[];
+  shapes?: CanvasShape[];
   selected: boolean;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -22,22 +24,36 @@ const STROKE_DASH: Record<ConnType['style'], string> = {
   dotted: '2,3',
 };
 
+function getEntityPortPosition(
+  blocks: CanvasBlock[],
+  shapes: CanvasShape[],
+  entityId: string,
+  side: 'top' | 'bottom' | 'left' | 'right'
+): { x: number; y: number } | null {
+  const block = blocks.find((b) => b.id === entityId);
+  if (block) return getPortPosition(block, side);
+  const shape = shapes.find((s) => s.id === entityId);
+  if (shape) return getShapePortPosition(shape, side);
+  return null;
+}
+
 export function CanvasConnection({
   connection,
   blocks,
+  shapes = [],
   selected,
   onClick,
   onContextMenu,
   onPointerDown,
   dimmed,
 }: CanvasConnectionProps) {
-  const fromBlock = blocks.find((b) => b.id === connection.from);
-  const toBlock = blocks.find((b) => b.id === connection.to);
-  if (!fromBlock || !toBlock) return null;
+  const from = getEntityPortPosition(blocks, shapes, connection.from.entityId, connection.from.side);
+  const to = getEntityPortPosition(blocks, shapes, connection.to.entityId, connection.to.side);
+  if (!from || !to) return null;
 
-  const from = getPortPosition(fromBlock, connection.fromSide);
-  const to = getPortPosition(toBlock, connection.toSide);
-  const path = computeBezierPath(from, to, connection.fromSide, connection.toSide);
+  const fromSide = connection.from.side;
+  const toSide = connection.to.side;
+  const path = computeBezierPath(from, to, fromSide, toSide);
 
   const strokeColor = dimmed ? 'rgba(255,255,255,0.06)' : (selected ? '#f97316' : 'rgba(255,255,255,0.15)');
   const strokeWidth = selected ? 2 : 1.5;
@@ -85,7 +101,7 @@ export function CanvasConnection({
         strokeWidth={strokeWidth}
         strokeDasharray={STROKE_DASH[connection.style]}
         markerEnd={connection.arrow !== 'none' ? (() => {
-          const angle = getArrowAngleForToSide(connection.toSide);
+          const angle = getArrowAngleForToSide(toSide);
           return selected ? `url(#arrowhead-selected-${angle})` : `url(#arrowhead-${angle})`;
         })() : undefined}
         markerStart={connection.arrow === 'both' ? (selected ? 'url(#arrowhead-start-selected)' : 'url(#arrowhead-start)') : undefined}

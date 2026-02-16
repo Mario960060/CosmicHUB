@@ -5,7 +5,8 @@ import { useAuth } from '@/hooks/use-auth';
 import { useCreateSubtask } from '@/lib/pm/mutations';
 import { SatelliteTypePicker } from '@/components/satellite/SatelliteTypePicker';
 import { SatelliteIcon, satelliteTypeToSpacecraft } from '@/components/satellite/SatelliteIcon';
-import { SATELLITE_TYPES, type SatelliteType } from '@/components/satellite/satellite-types';
+import { SATELLITE_TYPES, type SatelliteType, SPACECRAFT_TO_SATELLITE } from '@/components/satellite/satellite-types';
+import { getInitialSatelliteData } from '@/lib/satellite/initial-data';
 import { X } from 'lucide-react';
 import { z } from 'zod';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
@@ -25,18 +26,6 @@ const CREATOR_CONFIG: Record<SatelliteType, { title: string; placeholder: string
   ideas: { title: 'New Ideas Board', placeholder: 'e.g. Feature Backlog Q2' },
   repo: { title: 'New Dev Workspace', placeholder: 'e.g. Auth Module Code' },
   canvas: { title: 'New Canvas', placeholder: 'e.g. User Flow Mapping, API Architecture' },
-};
-
-const SPACECRAFT_TO_SATELLITE: Record<string, SatelliteType> = {
-  'sphere-drone': 'questions',
-  'hex-drone': 'issues',
-  'voyager-probe': 'notes',
-  'space-station': 'documents',
-  'pulse-beacon': 'checklist',
-  'astro-gauge': 'metrics',
-  'nebula-spark': 'ideas',
-  'core-module': 'repo',
-  'nexus-drone': 'canvas',
 };
 
 // Polymorphic parent: exactly one of parentTaskId, moduleId, projectId, minitaskId
@@ -409,27 +398,3 @@ export function CreateSubtaskDialog({
   );
 }
 
-function getInitialSatelliteData(type: SatelliteType): Record<string, unknown> {
-  switch (type) {
-    case 'questions':
-      return { questions: [] };
-    case 'issues':
-      return { issues: [] };
-    case 'notes':
-      return { content: '', sections: [], links: [] };
-    case 'documents':
-      return { files: [], links: [], folders: [] };
-    case 'checklist':
-      return { items: [] };
-    case 'metrics':
-      return { metrics: [], primary_metric_id: null, chart_type: 'line' };
-    case 'ideas':
-      return { ideas: [] };
-    case 'repo':
-      return {};
-    case 'canvas':
-      return { canvases: [] };
-    default:
-      return {};
-  }
-}

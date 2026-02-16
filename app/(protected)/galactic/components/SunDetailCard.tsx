@@ -23,6 +23,7 @@ import {
   calculateDaysRemaining,
   getDueDateStyle,
   sumEstimatedHours,
+  sumMinitaskEstimatedHours,
   countTasksByStatus,
   calculateModuleProgress,
   calculateTaskProgress,
@@ -95,6 +96,7 @@ function useSunDetails(projectId: string | null) {
               estimated_hours,
               priority_stars,
               progress_percent,
+              minitasks (id, estimated_hours),
               subtasks (
                 id,
                 name,
@@ -236,11 +238,14 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
 
   const projectSubtasks = projectSubtasksPre;
   const allTasks = modules.flatMap((m) => m.tasks || []);
+  const allTasksWithResolvedHours = allTasks.map((t) => ({
+    estimated_hours: t.estimated_hours ?? sumMinitaskEstimatedHours((t as { minitasks?: { estimated_hours: number | null }[] }).minitasks || []),
+  }));
   const progress = calculateProjectProgress(modules);
   const daysRemaining = calculateDaysRemaining(data.due_date);
   const dueStyle = getDueDateStyle(daysRemaining);
   const taskCounts = countTasksByStatus(allTasks);
-  const estimatedTotal = data.estimated_hours ?? sumEstimatedHours(allTasks);
+  const estimatedTotal = data.estimated_hours ?? sumEstimatedHours(allTasksWithResolvedHours);
   const priorityStars = data.priority_stars ?? 1;
 
   const loggedTotal = allTasks.reduce((acc, task) => {
@@ -265,7 +270,6 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -434,7 +438,10 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
                   (acc, st) => acc + sumLoggedHours((st as { work_logs?: { hours_spent: number }[] }).work_logs || []),
                   0
                 );
-                const modEstimatedHours = (mod as { estimated_hours?: number | null }).estimated_hours ?? sumEstimatedHours(mod.tasks || []);
+                const modTasksWithResolvedHours = (mod.tasks || []).map((t) => ({
+                  estimated_hours: t.estimated_hours ?? sumMinitaskEstimatedHours((t as { minitasks?: { estimated_hours: number | null }[] }).minitasks || []),
+                }));
+                const modEstimatedHours = (mod as { estimated_hours?: number | null }).estimated_hours ?? sumEstimatedHours(modTasksWithResolvedHours);
                 const modAssignedCount = getAssignedPeople(allModSubtasks as { assigned_to: string | null }[]).length;
                 const modStars = mod.priority_stars ?? 1;
                 return (
@@ -480,6 +487,8 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
                           );
                           const taskAssignedCount = getAssignedPeople((task.subtasks || []) as { assigned_to: string | null }[]).length;
                           const taskStars = task.priority_stars ?? 1;
+                          const taskEstimatedHours =
+                            task.estimated_hours ?? sumMinitaskEstimatedHours((task as { minitasks?: { estimated_hours: number | null }[] }).minitasks || []);
                           return (
                             <div key={task.id} style={{ marginBottom: 6 }}>
                               <button
@@ -505,7 +514,7 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
                                   <HierarchyMetaRow
                                     progress={taskProgress}
                                     loggedHours={taskLoggedHours}
-                                    estimatedHours={task.estimated_hours}
+                                    estimatedHours={taskEstimatedHours}
                                     assignedCount={taskAssignedCount}
                                     stars={taskStars}
                                     accentColor="#fbbf24"

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
 import { toast } from 'sonner';
-import { Trash2 } from 'lucide-react';
+import { Trash2, GripVertical } from 'lucide-react';
 
 interface ChecklistItem {
   id: string;
@@ -65,7 +65,7 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
 
   const updateItemStatus = (id: string, status: ChecklistItem['status']) => {
     const item = items.find((i) => i.id === id);
-    const next = items.map((i) => {
+    let next = items.map((i) => {
       if (i.id !== id) return i;
       return {
         ...i,
@@ -73,6 +73,13 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
         completed_at: status === 'done' ? new Date().toISOString() : null,
       };
     });
+    // When unchecking (done → todo): move item to bottom of list
+    if (item?.status === 'done' && status === 'todo') {
+      const moved = next.find((i) => i.id === id)!;
+      next = next.filter((i) => i.id !== id);
+      const maxOrder = Math.max(...next.map((i) => i.order), -1);
+      next = [...next, { ...moved, order: maxOrder + 1 }];
+    }
     const action = status === 'done' ? 'toggled_item' : 'toggled_item';
     saveItems(next, user ? { user_id: user.id, action, detail: item?.text ?? '', actor_name: user.full_name } : undefined);
   };
@@ -107,6 +114,43 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
   const doneCount = items.filter((i) => i.status === 'done').length;
   const total = items.length;
   const progress = total > 0 ? (doneCount / total) * 100 : 0;
+
+  // Display order: todo/doing first (by order), then done (by order)
+  const sortedItems = [...items].sort((a, b) => {
+    const aActive = a.status !== 'done';
+    const bActive = b.status !== 'done';
+    if (aActive && !bActive) return -1;
+    if (!aActive && bActive) return 1;
+    return a.order - b.order;
+  });
+
+  const reorderItems = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    const reordered = [...sortedItems];
+    const [removed] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, removed);
+    const next = reordered.map((i, idx) => ({ ...i, order: idx }));
+    saveItems(next, user ? { user_id: user.id, action: 'reordered_items', detail: '', actor_name: user.full_name } : undefined);
+  };
+
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null) return;
+    if (draggedIndex !== index) {
+      reorderItems(draggedIndex, index);
+      setDraggedIndex(index);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -146,9 +190,13 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {items.map((item) => (
+        {sortedItems.map((item, index) => (
           <div
             key={item.id}
+            draggable
+            onDragStart={() => handleDragStart(index)}
+            onDragOver={(e) => handleDragOver(e, index)}
+            onDragEnd={handleDragEnd}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -157,8 +205,16 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
               background: item.status === 'doing' ? 'rgba(0, 217, 255, 0.08)' : 'rgba(0, 0, 0, 0.2)',
               border: `1px solid ${item.status === 'doing' ? 'rgba(0, 217, 255, 0.3)' : 'rgba(0, 217, 255, 0.1)'}`,
               borderRadius: '8px',
+              cursor: 'grab',
+              opacity: draggedIndex === index ? 0.5 : 1,
             }}
           >
+            <div
+              style={{ cursor: 'grab', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <GripVertical size={16} />
+            </div>
             <button
               type="button"
               onClick={() => cycleStatus(item)}

@@ -82,7 +82,6 @@ export function AsteroidDetailCard({ minitaskId, onClose, onZoomIn }: AsteroidDe
   if (isLoading || !data) {
     return (
       <div
-        onClick={onClose}
         style={{
           position: 'fixed',
           inset: 0,
@@ -109,7 +108,6 @@ export function AsteroidDetailCard({ minitaskId, onClose, onZoomIn }: AsteroidDe
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,

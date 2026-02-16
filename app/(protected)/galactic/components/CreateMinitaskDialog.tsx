@@ -129,7 +129,6 @@ export function CreateMinitaskDialog({
 
   return (
     <div
-      onClick={handleClose}
       style={{
         position: 'fixed',
         inset: 0,

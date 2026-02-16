@@ -11,13 +11,14 @@ import { GalaxyPalette, type PaletteItem } from './components/GalaxyPalette';
 import { GalaxyContextMenu, type ContextMenuAction } from './components/GalaxyContextMenu';
 import { useGalacticData } from '@/hooks/use-galactic-data';
 import { useProjects, useProjectMembers } from '@/lib/pm/queries';
-import { useSaveGalaxyPositions, useGalaxyPositions, type SavePositionPayload, copyPositionToNewContext } from './hooks/use-galaxy-positions';
+import { useSaveGalaxyPositions, useGalaxyPositions, type SavePositionPayload, copyPositionsToNewContext } from './hooks/use-galaxy-positions';
 import { useGalaxyEditor } from './hooks/use-galaxy-editor';
-import { useDeleteModule, useDeleteTask, useDeleteSubtask, useDeleteMinitask, useCreateDependency } from '@/lib/pm/mutations';
+import { useDeleteModule, useDeleteTask, useDeleteSubtask, useDeleteMinitask, useDeleteDependency, useCreateDependency, useCreateSubtask } from '@/lib/pm/mutations';
 import { useAuth } from '@/hooks/use-auth';
 import { CreateModuleDialog } from '@/app/(protected)/pm/projects/[id]/components/CreateModuleDialog';
 import { CreateTaskDialog } from '@/app/(protected)/pm/projects/[id]/components/CreateTaskDialog';
-import { CreateSubtaskDialog } from '@/app/(protected)/pm/projects/[id]/components/CreateSubtaskDialog';
+import { SATELLITE_TYPE_PLURAL, SPACECRAFT_TO_SATELLITE } from '@/components/satellite/satellite-types';
+import { getInitialSatelliteData } from '@/lib/satellite/initial-data';
 import { EditProjectDialog } from './components/EditProjectDialog';
 import { EditModuleDialog } from './components/EditModuleDialog';
 import { EditTaskDialog } from './components/EditTaskDialog';
@@ -34,14 +35,15 @@ import { MoveToGalaxyDialog, type MoveTarget } from './components/MoveToGalaxyDi
 import { SatelliteDetailPanel } from '@/components/satellite/SatelliteDetailPanel';
 import { ChevronDown, Zap, Pencil, Save } from 'lucide-react';
 import { toast } from 'sonner';
-import type { CanvasObject } from '@/lib/galactic/types';
-import { useConfirm } from '@/components/ui/ConfirmDialog';
+import type { CanvasObject, Dependency } from '@/lib/galactic/types';
+import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
 
 export default function GalacticPage() {
   const { confirm, ConfirmDialog: ConfirmDialogEl } = useConfirm();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
+  const createSubtask = useCreateSubtask();
 
   const { data: projects, isLoading: loadingProjects } = useProjects();
   const initialProjectId = searchParams.get('project') || undefined;
@@ -96,8 +98,7 @@ export default function GalacticPage() {
   const [asteroidDetailId, setAsteroidDetailId] = useState<string | null>(null);
   const [moveToGalaxyDialog, setMoveToGalaxyDialog] = useState<{
     mode: 'task' | 'minitask';
-    entityId: string;
-    entityName: string;
+    entities: { id: string; name: string }[];
     currentModuleId?: string;
     currentTaskId?: string;
   } | null>(null);
@@ -134,6 +135,7 @@ export default function GalacticPage() {
   const deleteTask = useDeleteTask();
   const deleteSubtask = useDeleteSubtask();
   const deleteMinitask = useDeleteMinitask();
+  const deleteDependency = useDeleteDependency();
   const createDependency = useCreateDependency();
   const { data: existingPositions } = useGalaxyPositions(selectedProjectId ?? null);
 
@@ -200,51 +202,116 @@ export default function GalacticPage() {
     });
   }, []);
 
+  const CANVAS_WIDTH = 4800;
+  const CANVAS_HEIGHT = 2700;
+  const ASTEROID_VIEW_CENTER = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+  const ASTEROID_VIEW_SUB_ORBIT = 350;
+  const MODULE_SUB_RADIUS_TASK = 100;
+  const MODULE_SUB_RADIUS_MODULE = 100;
+
   const performSave = useCallback(async (deletedEntityIds?: Set<string>) => {
     if (!selectedProjectId || !data?.objects) return;
     const viewContext = selectedMinitaskId ? 'minitask' : selectedTaskId ? 'task' : selectedModuleId ? 'module' : 'solar_system';
-    const moduleId = selectedModuleId ?? null;
-    const taskId = selectedTaskId ?? null;
+    // In minitask view, use the minitask's own task_id/module_id (from metadata) so positions save correctly when arrived via portal
+    const centralMinitask = selectedMinitaskId ? data.objects.find((o) => o.type === 'minitask' && o.id === selectedMinitaskId) : null;
+    const moduleId = (centralMinitask?.metadata?.moduleId as string) ?? selectedModuleId ?? null;
+    const taskId = (centralMinitask?.metadata?.taskId as string) ?? selectedTaskId ?? null;
     const minitaskId = selectedMinitaskId ?? null;
 
     const objectIds = new Set(data.objects.map((o) => o.id));
     const currentViewPositions = data.objects
       .filter((obj) => obj.id && !['project-center', 'module-center', 'task-center', 'minitask-center'].includes(obj.id))
       .map((obj) => {
-        const pos = positionOverrides.get(obj.id) ?? obj.position;
+        let pos = positionOverrides.get(obj.id) ?? obj.position;
         const entityType: 'project' | 'module' | 'task' | 'subtask' | 'portal' | 'minitask' = obj.type === 'portal' ? 'portal' : (obj.type as 'project' | 'module' | 'task' | 'subtask' | 'minitask');
         let entityId = obj.id;
         if (obj.type === 'portal') {
           entityId = (obj.metadata?.portalTargetMinitaskId ?? obj.metadata?.portalTargetTaskId ?? obj.metadata?.portalTargetModuleId ?? obj.id) as string;
         }
+        // Subtasks belonging to minitasks: save with minitask context so positions persist in asteroid view
+        const objMinitaskId = obj.metadata?.minitaskId as string | undefined;
+        const useMinitaskContext = entityType === 'subtask' && objMinitaskId;
+        const effectiveViewContext = useMinitaskContext ? 'minitask' : viewContext;
+        const effectiveMinitaskId = useMinitaskContext ? objMinitaskId : minitaskId;
+
+        // When saving subtask in minitask context from task/module view: convert pos to asteroid view coords
+        if (useMinitaskContext && viewContext !== 'minitask') {
+          const asteroid = data.objects.find((o) => o.type === 'minitask' && o.id === objMinitaskId);
+          const asteroidPos = asteroid?.position;
+          if (asteroidPos) {
+            if (viewContext === 'task') {
+              // Task view: subPos = mtPos + (stored - center) => stored = center + (pos - mtPos)
+              pos = {
+                x: ASTEROID_VIEW_CENTER.x + (pos.x - asteroidPos.x),
+                y: ASTEROID_VIEW_CENTER.y + (pos.y - asteroidPos.y),
+              };
+            } else {
+              // Module view: subPos = mtPos + (stored - center) * scale => stored = center + (pos - mtPos) / scale
+              const isTaskAsteroid = !!asteroid?.metadata?.taskId;
+              const scale = isTaskAsteroid ? MODULE_SUB_RADIUS_TASK / ASTEROID_VIEW_SUB_ORBIT : MODULE_SUB_RADIUS_MODULE / ASTEROID_VIEW_SUB_ORBIT;
+              pos = {
+                x: ASTEROID_VIEW_CENTER.x + (pos.x - asteroidPos.x) / scale,
+                y: ASTEROID_VIEW_CENTER.y + (pos.y - asteroidPos.y) / scale,
+              };
+            }
+          }
+        }
+
         const payload: Record<string, unknown> = {
           entity_type: entityType,
           entity_id: entityId,
           x: pos.x,
           y: pos.y,
-          view_context: viewContext as 'solar_system' | 'module' | 'task' | 'minitask',
+          view_context: effectiveViewContext as 'solar_system' | 'module' | 'task' | 'minitask',
           module_id: moduleId,
           task_id: taskId,
         };
-        if (minitaskId) payload.minitask_id = minitaskId;
+        if (effectiveMinitaskId) payload.minitask_id = effectiveMinitaskId;
         return payload;
       });
 
     // Include positions for newly created entities not yet in data.objects
+    // Subtasks belonging to minitasks: use minitask context (same as existing objects) so positions persist in asteroid view
     for (const [id, pos] of positionOverrides) {
       if (!objectIds.has(id)) {
         const meta = newEntityMeta.get(id);
         if (meta) {
+          const metaMinitaskId = meta.minitaskId as string | undefined;
+          const useMinitaskContext = meta.type === 'subtask' && metaMinitaskId;
+          const effectiveViewContext = useMinitaskContext ? 'minitask' : viewContext;
+          const effectiveMinitaskId = useMinitaskContext ? metaMinitaskId : minitaskId;
+
+          let savePos = pos;
+          if (useMinitaskContext && viewContext !== 'minitask') {
+            const asteroid = data.objects.find((o) => o.type === 'minitask' && o.id === metaMinitaskId);
+            const asteroidPos = asteroid?.position;
+            if (asteroidPos) {
+              if (viewContext === 'task') {
+                savePos = {
+                  x: ASTEROID_VIEW_CENTER.x + (pos.x - asteroidPos.x),
+                  y: ASTEROID_VIEW_CENTER.y + (pos.y - asteroidPos.y),
+                };
+              } else {
+                const isTaskAsteroid = !!asteroid?.metadata?.taskId;
+                const scale = isTaskAsteroid ? MODULE_SUB_RADIUS_TASK / ASTEROID_VIEW_SUB_ORBIT : MODULE_SUB_RADIUS_MODULE / ASTEROID_VIEW_SUB_ORBIT;
+                savePos = {
+                  x: ASTEROID_VIEW_CENTER.x + (pos.x - asteroidPos.x) / scale,
+                  y: ASTEROID_VIEW_CENTER.y + (pos.y - asteroidPos.y) / scale,
+                };
+              }
+            }
+          }
+
           const payload: Record<string, unknown> = {
             entity_type: meta.type,
             entity_id: id,
-            x: pos.x,
-            y: pos.y,
-            view_context: viewContext as 'solar_system' | 'module' | 'task' | 'minitask',
+            x: savePos.x,
+            y: savePos.y,
+            view_context: effectiveViewContext as 'solar_system' | 'module' | 'task' | 'minitask',
             module_id: moduleId,
             task_id: taskId,
           };
-          if (minitaskId) payload.minitask_id = minitaskId;
+          if (effectiveMinitaskId) payload.minitask_id = effectiveMinitaskId;
           currentViewPositions.push(payload);
         }
       }
@@ -384,6 +451,50 @@ export default function GalacticPage() {
     setSelectedMinitaskId(undefined);
   }, [isEditMode, performSave]);
 
+  // Save before portal navigation so position overrides (e.g. in asteroid system) are not lost
+  const handlePortalClick = useCallback(
+    async (moduleId: string) => {
+      if (isEditMode) {
+        try {
+          await performSave();
+        } catch {
+          return;
+        }
+      }
+      setSelectedModuleId(moduleId);
+      setSelectedTaskId(undefined);
+      setSelectedMinitaskId(undefined);
+    },
+    [isEditMode, performSave]
+  );
+  const handleTaskPortalClick = useCallback(
+    async (taskId: string) => {
+      if (isEditMode) {
+        try {
+          await performSave();
+        } catch {
+          return;
+        }
+      }
+      setSelectedTaskId(taskId);
+      setSelectedMinitaskId(undefined);
+    },
+    [isEditMode, performSave]
+  );
+  const handleMinitaskPortalClick = useCallback(
+    async (minitaskId: string) => {
+      if (isEditMode) {
+        try {
+          await performSave();
+        } catch {
+          return;
+        }
+      }
+      setSelectedMinitaskId(minitaskId);
+    },
+    [isEditMode, performSave]
+  );
+
   const handleProjectChange = useCallback(async (projectId: string) => {
     if (isEditMode) {
       try {
@@ -405,7 +516,7 @@ export default function GalacticPage() {
   }, []);
 
   const handleCanvasDrop = useCallback(
-    (e: React.DragEvent) => {
+    async (e: React.DragEvent) => {
       e.preventDefault();
       try {
         const raw = e.dataTransfer.getData('application/json');
@@ -420,32 +531,24 @@ export default function GalacticPage() {
         const canvasY = relY * 2700;
 
         if (item.entityType === 'subtask') {
+          let dropPayload: {
+            parentTaskId?: string;
+            parentTaskName?: string;
+            parentModuleId?: string;
+            parentModuleName?: string;
+            parentProjectId?: string;
+            parentProjectName?: string;
+            parentMinitaskId?: string;
+            parentMinitaskName?: string;
+          } | null = null;
           if (selectedMinitaskId) {
             const asteroid = objectsToRender.find((o) => o.type === 'minitask' && o.id === selectedMinitaskId);
-            setPendingDrop({
-              item,
-              x: canvasX,
-              y: canvasY,
-              parentMinitaskId: selectedMinitaskId,
-              parentMinitaskName: asteroid?.name ?? 'Asteroid',
-            });
+            dropPayload = { parentMinitaskId: selectedMinitaskId, parentMinitaskName: asteroid?.name ?? 'Asteroid' };
           } else if (selectedProjectId && !selectedModuleId && !selectedTaskId) {
-            setPendingDrop({
-              item,
-              x: canvasX,
-              y: canvasY,
-              parentProjectId: selectedProjectId,
-              parentProjectName: projects?.find((p) => p.id === selectedProjectId)?.name ?? 'Project',
-            });
+            dropPayload = { parentProjectId: selectedProjectId, parentProjectName: projects?.find((p) => p.id === selectedProjectId)?.name ?? 'Project' };
           } else if (selectedModuleId && !selectedTaskId) {
             const module = objectsToRender.find((o) => o.type === 'module' && o.id === selectedModuleId);
-            setPendingDrop({
-              item,
-              x: canvasX,
-              y: canvasY,
-              parentModuleId: selectedModuleId,
-              parentModuleName: module?.name ?? 'Module',
-            });
+            dropPayload = { parentModuleId: selectedModuleId, parentModuleName: module?.name ?? 'Module' };
           } else if (selectedTaskId) {
             const dropThreshold = 150;
             const nearest = objectsToRender.find((o) => {
@@ -454,24 +557,45 @@ export default function GalacticPage() {
               return d < dropThreshold;
             });
             if (nearest?.type === 'minitask') {
-              setPendingDrop({
-                item,
-                x: canvasX,
-                y: canvasY,
-                parentMinitaskId: nearest.id,
-                parentMinitaskName: nearest.name,
-              });
+              dropPayload = { parentMinitaskId: nearest.id, parentMinitaskName: nearest.name };
             } else {
               const task = objectsToRender.find((o) => o.type === 'task' && o.id === selectedTaskId);
-              setPendingDrop({
-                item,
-                x: canvasX,
-                y: canvasY,
-                parentTaskId: selectedTaskId,
-                parentTaskName: task?.name ?? 'Task',
-              });
+              dropPayload = { parentTaskId: selectedTaskId, parentTaskName: task?.name ?? 'Task' };
             }
-          } else {
+          }
+          if (dropPayload && user) {
+            const parentName = dropPayload.parentTaskName ?? dropPayload.parentModuleName ?? dropPayload.parentProjectName ?? dropPayload.parentMinitaskName ?? 'Parent';
+            const satelliteType = SPACECRAFT_TO_SATELLITE[item.spacecraftType] ?? 'notes';
+            const typePlural = SATELLITE_TYPE_PLURAL[satelliteType];
+            const name = `${parentName} ${typePlural}`;
+            try {
+              const data = await createSubtask.mutateAsync({
+                ...(dropPayload.parentTaskId && { parentId: dropPayload.parentTaskId }),
+                ...(dropPayload.parentModuleId && { moduleId: dropPayload.parentModuleId }),
+                ...(dropPayload.parentProjectId && { projectId: dropPayload.parentProjectId }),
+                ...(dropPayload.parentMinitaskId && { minitaskId: dropPayload.parentMinitaskId }),
+                name,
+                description: undefined,
+                estimatedHours: undefined,
+                priorityStars: 1.0,
+                createdBy: user.id,
+                satelliteType,
+                satelliteData: getInitialSatelliteData(satelliteType),
+              });
+              handlePositionChange((data as { id: string }).id, canvasX, canvasY);
+              setNewEntityMeta((prev) =>
+                new Map(prev).set((data as { id: string }).id, {
+                  type: 'subtask',
+                  spacecraftType: item.spacecraftType,
+                  taskId: dropPayload!.parentTaskId,
+                  minitaskId: dropPayload!.parentMinitaskId,
+                })
+              );
+              trackEntityCreated({ type: 'subtask', id: (data as { id: string }).id });
+            } catch {
+              toast.error('Failed to create satellite');
+            }
+          } else if (!dropPayload) {
             toast.error('Select a project, module, or task first.');
           }
         } else if (item.entityType === 'minitask') {
@@ -509,7 +633,7 @@ export default function GalacticPage() {
         }
       } catch (_) {}
     },
-    [objectsToRender, selectedProjectId, selectedModuleId, selectedTaskId, selectedMinitaskId, projects]
+    [objectsToRender, selectedProjectId, selectedModuleId, selectedTaskId, selectedMinitaskId, projects, user, createSubtask, handlePositionChange, setNewEntityMeta, trackEntityCreated]
   );
 
   const handleCreateModuleSuccess = useCallback(
@@ -566,26 +690,6 @@ export default function GalacticPage() {
     [pendingDrop, handlePositionChange, trackEntityCreated]
   );
 
-  const handleCreateSubtaskSuccess = useCallback(
-    (subtask: { id: string }) => {
-      if (pendingDrop && pendingDrop.item.entityType === 'subtask') {
-        handlePositionChange(subtask.id, pendingDrop.x, pendingDrop.y);
-        setNewEntityMeta((prev) =>
-          new Map(prev).set(subtask.id, {
-            type: 'subtask',
-            spacecraftType:
-              pendingDrop!.item.entityType === 'subtask' ? pendingDrop!.item.spacecraftType : undefined,
-            taskId: pendingDrop!.parentTaskId,
-            minitaskId: pendingDrop!.parentMinitaskId,
-          })
-        );
-        trackEntityCreated({ type: 'subtask', id: subtask.id });
-      }
-      setPendingDrop(null);
-    },
-    [pendingDrop, handlePositionChange, trackEntityCreated]
-  );
-
   const handleCreateModalClose = useCallback(() => {
     setPendingDrop(null);
   }, []);
@@ -606,7 +710,11 @@ export default function GalacticPage() {
       const sMinY = Math.min(screenStart.y, screenEnd.y);
       const sMaxY = Math.max(screenStart.y, screenEnd.y);
 
+      // Exclude main/anchor element per view: sun (project), planet (module), moon (task), asteroid (minitask)
+      const mainElementId = selectedMinitaskId ?? selectedTaskId ?? selectedModuleId ?? selectedProjectId ?? null;
       const excludeIds = new Set(['project-center', 'module-center']);
+      if (mainElementId) excludeIds.add(mainElementId);
+
       const ids: string[] = [];
 
       allEls.forEach((el) => {
@@ -627,7 +735,7 @@ export default function GalacticPage() {
 
       setSelectedObjectIds(new Set(ids));
     },
-    [] // DOM-based, no deps needed
+    [selectedMinitaskId, selectedTaskId, selectedModuleId, selectedProjectId]
   );
 
 
@@ -635,6 +743,28 @@ export default function GalacticPage() {
     e.preventDefault();
     setContextMenu({ object, x: e.clientX, y: e.clientY });
   }, []);
+
+  const handleDependencyContextMenu = useCallback(
+    async (dep: Dependency, e: React.MouseEvent) => {
+      e.preventDefault();
+      if (!isEditMode) return;
+      const ok = await confirm({
+        title: 'Usuń zależność',
+        message: 'Czy na pewno chcesz usunąć tę zależność?',
+        confirmLabel: 'Usuń',
+        cancelLabel: 'Anuluj',
+        variant: 'danger',
+      });
+      if (!ok) return;
+      try {
+        await deleteDependency.mutateAsync({ dependencyId: dep.id });
+        toast.success('Zależność usunięta');
+      } catch (err) {
+        toast.error('Nie udało się usunąć zależności');
+      }
+    },
+    [isEditMode, confirm, deleteDependency]
+  );
 
   const handleContextMenuAction = useCallback(
     async (action: ContextMenuAction, object: CanvasObject) => {
@@ -658,18 +788,25 @@ export default function GalacticPage() {
           break;
         case 'move-to-galaxy':
           if ((object.type === 'task' || object.type === 'minitask') && selectedProjectId) {
-            setMoveToGalaxyDialog({
-              mode: object.type === 'task' ? 'task' : 'minitask',
-              entityId: object.id,
-              entityName: object.name,
-              currentModuleId: selectedModuleId,
-              currentTaskId: selectedTaskId,
-            });
+            const isInSelection = selectedObjectIds?.has(object.id) && (selectedObjectIds?.size ?? 0) > 1;
+            const toMove = isInSelection
+              ? objectsToRender.filter(
+                  (o) => selectedObjectIds!.has(o.id) && (o.type === 'task' || o.type === 'minitask') && o.type === object.type
+                )
+              : [object];
+            if (toMove.length > 0) {
+              setMoveToGalaxyDialog({
+                mode: object.type === 'task' ? 'task' : 'minitask',
+                entities: toMove.map((o) => ({ id: o.id, name: o.name })),
+                currentModuleId: selectedModuleId,
+                currentTaskId: selectedTaskId,
+              });
+            }
           }
           break;
       }
     },
-    [startConnectionMode, selectedProjectId, selectedModuleId, selectedTaskId]
+    [startConnectionMode, selectedProjectId, selectedModuleId, selectedTaskId, selectedObjectIds, objectsToRender]
   );
 
   // Group delete via Delete key
@@ -748,8 +885,8 @@ export default function GalacticPage() {
   }, [deleteConfirm, deleteModule, deleteTask, deleteSubtask, deleteMinitask, performSave]);
 
   const handleMoveToGalaxySuccess = useCallback(
-    async (target: MoveTarget, dialogState: { mode: 'task' | 'minitask'; entityId: string; currentModuleId?: string; currentTaskId?: string }) => {
-      const { mode, entityId, currentModuleId, currentTaskId } = dialogState;
+    async (target: MoveTarget, dialogState: { mode: 'task' | 'minitask'; entities: { id: string; name: string }[]; currentModuleId?: string; currentTaskId?: string }) => {
+      const { mode, entities, currentModuleId, currentTaskId } = dialogState;
       const entityType = mode === 'task' ? 'task' : 'minitask';
 
       const viewContext = selectedMinitaskId ? 'minitask' : selectedTaskId ? 'task' : selectedModuleId ? 'module' : 'solar_system';
@@ -769,10 +906,10 @@ export default function GalacticPage() {
         newContext = { view_context: 'solar_system', module_id: null, task_id: null, minitask_id: null };
       }
 
-      const positions = copyPositionToNewContext(
+      const positions = copyPositionsToNewContext(
         existingPositions ?? [],
         entityType,
-        entityId,
+        entities.map((e) => e.id),
         oldContext,
         newContext
       );
@@ -791,9 +928,9 @@ export default function GalacticPage() {
         setSelectedTaskId(undefined);
         setSelectedMinitaskId(undefined);
       }
-      setSelectedObjectIds(new Set([entityId]));
+      setSelectedObjectIds(new Set(entities.map((e) => e.id)));
       enterEditMode();
-      toast.success('Przeniesiono pomyślnie');
+      toast.success(`Przeniesiono ${entities.length} element${entities.length > 1 ? 'ów' : ''} pomyślnie`);
     },
     [selectedModuleId, selectedTaskId, selectedMinitaskId, existingPositions, savePositions, enterEditMode]
   );
@@ -1011,10 +1148,13 @@ export default function GalacticPage() {
   return (
     <div
       style={{
-        minHeight: '100vh',
+        height: 'calc(100vh - 64px)',
         width: '100%',
         background: '#050510',
         paddingTop: BAR_HEIGHT,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
       {/* Header Controls – fixed pod app header, zawsze widoczne przy scrolu */}
@@ -1364,7 +1504,7 @@ export default function GalacticPage() {
       </div>
 
       {/* Galactic Scene – pod fixed barem */}
-      <div style={{ height: 'calc(100vh - 64px - 56px)', minHeight: 400, overflow: 'hidden' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
       {isError ? (
         <div
           style={{
@@ -1508,9 +1648,10 @@ export default function GalacticPage() {
               viewType={selectedMinitaskId ? 'minitask-zoom' : selectedTaskId ? 'task-zoom' : selectedModuleId ? 'module-zoom' : 'solar-system'}
               onObjectClick={handleObjectClick}
               onObjectContextMenu={handleObjectContextMenu}
-              onPortalClick={(moduleId) => setSelectedModuleId(moduleId)}
-              onTaskPortalClick={(taskId) => setSelectedTaskId(taskId)}
-              onMinitaskPortalClick={(minitaskId) => setSelectedMinitaskId(minitaskId)}
+              onDependencyContextMenu={isEditMode ? handleDependencyContextMenu : undefined}
+              onPortalClick={handlePortalClick}
+              onTaskPortalClick={handleTaskPortalClick}
+              onMinitaskPortalClick={handleMinitaskPortalClick}
               onCanvasBackgroundClick={handleCanvasBackgroundClick}
               isEditMode={isEditMode}
               selectedObjectId={selectedMinitaskId ?? selectedTaskId ?? selectedModuleId}
@@ -1586,66 +1727,16 @@ export default function GalacticPage() {
 
       {/* Delete confirmation dialog */}
       {deleteConfirm && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.7)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-          }}
-          onClick={() => setDeleteConfirm(null)}
-        >
-          <div
-            style={{
-              background: 'rgba(21, 27, 46, 0.95)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              borderRadius: '16px',
-              padding: '32px',
-              maxWidth: '400px',
-              boxShadow: '0 0 40px rgba(239, 68, 68, 0.2)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ color: '#fff', marginBottom: '16px', fontSize: '18px' }}>
-              Delete {deleteConfirm.object.name}?
-            </h3>
-            <p style={{ color: 'rgba(255,255,255,0.7)', marginBottom: '24px', fontSize: '14px' }}>
-              This action cannot be undone.
-            </p>
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                style={{
-                  padding: '10px 20px',
-                  background: 'rgba(255,255,255,0.1)',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  borderRadius: '8px',
-                  color: '#fff',
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDeleteConfirm}
-                style={{
-                  padding: '10px 20px',
-                  background: 'rgba(239, 68, 68, 0.3)',
-                  border: '1px solid #ef4444',
-                  borderRadius: '8px',
-                  color: '#ef4444',
-                  cursor: 'pointer',
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          open={!!deleteConfirm}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteConfirm(null)}
+          title={`Usunąć ${deleteConfirm.object.name}?`}
+          message="Ta operacja jest nieodwracalna. Wszystkie dane zostaną trwale usunięte."
+          confirmLabel="Usuń"
+          cancelLabel="Anuluj"
+          variant="danger"
+        />
       )}
 
       {/* Create modals from palette drop */}
@@ -1678,23 +1769,6 @@ export default function GalacticPage() {
           onSuccess={handleCreateMinitaskSuccess}
         />
       )}
-      {pendingDrop?.item.entityType === 'subtask' && (pendingDrop?.parentTaskId || pendingDrop?.parentModuleId || pendingDrop?.parentProjectId || pendingDrop?.parentMinitaskId) && (
-        <CreateSubtaskDialog
-          open={true}
-          onClose={handleCreateModalClose}
-          parentTaskId={pendingDrop.parentTaskId}
-          parentTaskName={pendingDrop.parentTaskName}
-          moduleId={pendingDrop.parentModuleId}
-          moduleName={pendingDrop.parentModuleName}
-          projectId={pendingDrop.parentProjectId}
-          projectName={pendingDrop.parentProjectName}
-          minitaskId={pendingDrop.parentMinitaskId}
-          minitaskName={pendingDrop.parentMinitaskName}
-          initialSatelliteType={pendingDrop.item.spacecraftType}
-          onSuccess={handleCreateSubtaskSuccess}
-        />
-      )}
-
       {/* Sun Detail Card (LPM on sun) */}
       {projectDetailId && (
         <SunDetailCard
@@ -1789,7 +1863,6 @@ export default function GalacticPage() {
 
       {subtaskModalId && (
         <div
-          onClick={() => setSubtaskModalId(null)}
           style={{
             position: 'fixed',
             inset: 0,
@@ -1907,8 +1980,7 @@ export default function GalacticPage() {
         <MoveToGalaxyDialog
           open={true}
           mode={moveToGalaxyDialog.mode}
-          entityId={moveToGalaxyDialog.entityId}
-          entityName={moveToGalaxyDialog.entityName}
+          entities={moveToGalaxyDialog.entities}
           projectId={selectedProjectId}
           projectName={projects?.find((p) => p.id === selectedProjectId)?.name}
           currentModuleId={moveToGalaxyDialog.currentModuleId}

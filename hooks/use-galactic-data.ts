@@ -46,7 +46,7 @@ export function useGalacticData(
         // Fetch project data, modules, project-level subtasks, project-level minitasks, and galaxy positions
         const [projectRes, modulesRes, projectSubtasksRes, projectMinitasksRes, positionsRes] = await Promise.all([
           supabase.from('projects').select('*').eq('id', projectId).single(),
-          supabase.from('modules').select('*, tasks(*, subtasks(id, status), minitasks(*, subtasks(*)))').eq('project_id', projectId).order('order_index', { ascending: true }),
+          supabase.from('modules').select('*, tasks(*, subtasks(id, status, satellite_type, satellite_data), minitasks(*, subtasks(*)))').eq('project_id', projectId).order('order_index', { ascending: true }),
           supabase.from('subtasks').select('*').eq('project_id', projectId),
           supabase.from('minitasks').select('*, subtasks(*)').eq('project_id', projectId).order('created_at', { ascending: true }),
           supabase.from('galaxy_positions').select('*').eq('project_id', projectId),

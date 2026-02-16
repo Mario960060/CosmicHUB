@@ -154,10 +154,10 @@ export function CanvasBlock({
         className="canvas-block-resize"
         style={{
           position: 'absolute',
-          bottom: 0,
-          right: 0,
-          width: 14,
-          height: 14,
+          bottom: -6,
+          right: -6,
+          width: 28,
+          height: 28,
           cursor: 'se-resize',
           opacity: hovered || selected ? 1 : 0,
           transition: 'opacity 0.15s',
@@ -170,10 +170,10 @@ export function CanvasBlock({
         <div
           style={{
             position: 'absolute',
-            bottom: 3,
-            right: 3,
-            width: 7,
-            height: 7,
+            bottom: 6,
+            right: 6,
+            width: 10,
+            height: 10,
             borderRight: '1.5px solid rgba(255,255,255,0.2)',
             borderBottom: '1.5px solid rgba(255,255,255,0.2)',
             borderRadius: '0 0 2px 0',

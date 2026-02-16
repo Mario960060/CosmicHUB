@@ -43,6 +43,8 @@ const ACTION_LABELS: Record<string, string> = {
   deleted_issue: 'deleted issue',
   removed_idea: 'removed idea',
   updated_note: 'updated note',
+  added_note: 'added note',
+  deleted_note: 'deleted note',
   added_link: 'added link',
   removed_link: 'removed link',
   added_item: 'added item',
@@ -149,6 +151,7 @@ export function parseCanvasesFromSatelliteData(
       gridEnabled: (raw as Record<string, unknown>).gridEnabled ?? false,
       blocks: (raw as Record<string, unknown>).blocks ?? [],
       connections: (raw as Record<string, unknown>).connections ?? [],
+      shapes: (raw as Record<string, unknown>).shapes ?? [],
       ...(raw as Record<string, unknown>),
     }];
   }
