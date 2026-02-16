@@ -48,7 +48,7 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
 
   const saveItems = async (
     newItems: ChecklistItem[],
-    activityEntry?: { user_id: string; action: string; detail: string }
+    activityEntry?: { user_id: string; action: string; detail: string; actor_name?: string }
   ) => {
     setSaving(true);
     const { error } = await saveSatelliteData(subtaskId, { items: newItems }, {

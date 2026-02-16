@@ -65,7 +65,7 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
 
   const save = async (
     nextLinks: DocLink[],
-    activityEntry?: { user_id: string; action: string; detail: string }
+    activityEntry?: { user_id: string; action: string; detail: string; actor_name?: string }
   ) => {
     setSaving(true);
     const { files, folders } = getExistingData();

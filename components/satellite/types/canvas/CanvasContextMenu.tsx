@@ -87,6 +87,7 @@ export function BlockContextMenu({
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
           <div
             onClick={() => onFontColorChange(null)}
+            title="Default"
             style={{
               width: 16,
               height: 16,
@@ -94,7 +95,6 @@ export function BlockContextMenu({
               background: 'rgba(255,255,255,0.2)',
               cursor: 'pointer',
               border: !blockFontColor ? '2px solid #fff' : '1.5px solid transparent',
-              title: 'Default',
             }}
           />
           {fontColorOptions.map((c) => (

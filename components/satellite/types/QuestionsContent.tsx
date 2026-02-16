@@ -141,6 +141,14 @@ export function QuestionsContent({ subtaskId, satelliteData, subtaskName = '', p
     setExpandedId(null);
   };
 
+  const deleteQuestion = (id: string) => {
+    if (!user || !canDelete) return;
+    const q = questions.find((x) => x.id === id);
+    const next = questions.filter((p) => p.id !== id);
+    save(next, { user_id: user.id, action: 'deleted_question', detail: q?.text ?? '', actor_name: user.full_name });
+    setExpandedId(null);
+  };
+
   const assignQuestion = async (id: string, userId: string | null) => {
     const q = questions.find((x) => x.id === id);
     const next = questions.map((p) =>

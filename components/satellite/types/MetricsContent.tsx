@@ -92,7 +92,7 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
     nextMetrics: Metric[],
     nextPrimary?: string | null,
     nextChart?: string,
-    activityEntry?: { user_id: string; action: string; detail: string }
+    activityEntry?: { user_id: string; action: string; detail: string; actor_name?: string }
   ) => {
     setSaving(true);
     const payload: Record<string, unknown> = {
