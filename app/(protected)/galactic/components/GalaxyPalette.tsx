@@ -21,6 +21,7 @@ const SATELLITE_ITEMS = [
   { type: 'astro-gauge' as const, name: 'Metrics', icon: '📊' },
   { type: 'nebula-spark' as const, name: 'Ideas', icon: '💡' },
   { type: 'core-module' as const, name: 'Repo/Dev', icon: '🔧' },
+  { type: 'nexus-drone' as const, name: 'Canvas', icon: '📋' },
 ];
 
 const MOON_ITEMS = [
@@ -29,13 +30,18 @@ const MOON_ITEMS = [
   { type: 'dusty-moon' as const, name: 'Dusty', icon: '🌖' },
 ];
 
+const ASTEROID_ITEMS = [
+  { type: 'rocky' as const, name: 'Rocky', icon: '🪨' },
+];
+
 export type PaletteItem =
   | { entityType: 'module'; planetType: 'ocean' | 'indigo' | 'rose' | 'amber' }
   | { entityType: 'task'; spacecraftType: string }
-  | { entityType: 'subtask'; spacecraftType: string };
+  | { entityType: 'subtask'; spacecraftType: string }
+  | { entityType: 'minitask'; asteroidType: string };
 
 interface GalaxyPaletteProps {
-  viewType: 'solar-system' | 'module-zoom';
+  viewType: 'solar-system' | 'module-zoom' | 'task-zoom' | 'minitask-zoom';
   onDragStart?: (item: PaletteItem) => void;
 }
 
@@ -58,6 +64,7 @@ export function GalaxyPalette({ viewType, onDragStart }: GalaxyPaletteProps) {
           padding: '16px',
           overflowY: 'auto',
         }}
+        className="scrollbar-cosmic"
       >
         <h3
           style={{
@@ -72,7 +79,7 @@ export function GalaxyPalette({ viewType, onDragStart }: GalaxyPaletteProps) {
         >
           🪐 Planets
         </h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
           {PLANET_ITEMS.map((p) => (
             <div
               key={p.type}
@@ -112,12 +119,233 @@ export function GalaxyPalette({ viewType, onDragStart }: GalaxyPaletteProps) {
             </div>
           ))}
         </div>
+        <h3
+          style={{
+            fontFamily: 'Orbitron, sans-serif',
+            fontSize: '12px',
+            fontWeight: 700,
+            color: '#00f0ff',
+            letterSpacing: '1px',
+            marginBottom: '12px',
+            textTransform: 'uppercase',
+          }}
+        >
+          🪨 Asteroids (minitasks)
+        </h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
+          {ASTEROID_ITEMS.map((a) => (
+            <div
+              key={a.type}
+              draggable
+              onDragStart={(e) =>
+                handleDragStart(e, { entityType: 'minitask', asteroidType: a.type })
+              }
+              style={{
+                padding: '10px 14px',
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(139, 92, 46, 0.5)',
+                borderRadius: '10px',
+                cursor: 'grab',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+              }}
+            >
+              <span style={{ fontSize: '20px' }}>{a.icon}</span>
+              <span style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{a.name}</span>
+            </div>
+          ))}
+        </div>
+        <h3
+          style={{
+            fontFamily: 'Orbitron, sans-serif',
+            fontSize: '12px',
+            fontWeight: 700,
+            color: '#00f0ff',
+            letterSpacing: '1px',
+            marginBottom: '12px',
+            textTransform: 'uppercase',
+          }}
+        >
+          🛸 Satellites (subtasks)
+        </h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {SATELLITE_ITEMS.map((s) => (
+            <div
+              key={s.type}
+              draggable
+              onDragStart={(e) =>
+                handleDragStart(e, { entityType: 'subtask', spacecraftType: s.type })
+              }
+              style={{
+                padding: '10px 14px',
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(0, 240, 255, 0.3)',
+                borderRadius: '10px',
+                cursor: 'grab',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+              }}
+            >
+              <SatelliteIcon type={s.type} size="sm" />
+              <span style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{s.name}</span>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
+  if (viewType === 'minitask-zoom') {
+    return (
+      <div
+        style={{
+          width: 220,
+          flexShrink: 0,
+          background: 'rgba(21, 27, 46, 0.95)',
+          borderRight: '1px solid rgba(0, 240, 255, 0.2)',
+          padding: '16px',
+          overflowY: 'auto',
+        }}
+        className="scrollbar-cosmic"
+      >
+        <h3
+          style={{
+            fontFamily: 'Orbitron, sans-serif',
+            fontSize: '12px',
+            fontWeight: 700,
+            color: '#00f0ff',
+            letterSpacing: '1px',
+            marginBottom: '12px',
+            textTransform: 'uppercase',
+          }}
+        >
+          🛸 Satellites (subtasks)
+        </h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {SATELLITE_ITEMS.map((s) => (
+            <div
+              key={s.type}
+              draggable
+              onDragStart={(e) =>
+                handleDragStart(e, { entityType: 'subtask', spacecraftType: s.type })
+              }
+              style={{
+                padding: '10px 14px',
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(0, 240, 255, 0.3)',
+                borderRadius: '10px',
+                cursor: 'grab',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+              }}
+            >
+              <SatelliteIcon type={s.type} size="sm" />
+              <span style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{s.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (viewType === 'task-zoom') {
+    return (
+      <div
+        style={{
+          width: 220,
+          flexShrink: 0,
+          background: 'rgba(21, 27, 46, 0.95)',
+          borderRight: '1px solid rgba(0, 240, 255, 0.2)',
+          padding: '16px',
+          overflowY: 'auto',
+        }}
+        className="scrollbar-cosmic"
+      >
+        <h3
+          style={{
+            fontFamily: 'Orbitron, sans-serif',
+            fontSize: '12px',
+            fontWeight: 700,
+            color: '#00f0ff',
+            letterSpacing: '1px',
+            marginBottom: '12px',
+            textTransform: 'uppercase',
+          }}
+        >
+          🪨 Asteroids (minitasks)
+        </h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
+          {ASTEROID_ITEMS.map((a) => (
+            <div
+              key={a.type}
+              draggable
+              onDragStart={(e) =>
+                handleDragStart(e, { entityType: 'minitask', asteroidType: a.type })
+              }
+              style={{
+                padding: '10px 14px',
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(139, 92, 46, 0.5)',
+                borderRadius: '10px',
+                cursor: 'grab',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+              }}
+            >
+              <span style={{ fontSize: '20px' }}>{a.icon}</span>
+              <span style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{a.name}</span>
+            </div>
+          ))}
+        </div>
+        <h3
+          style={{
+            fontFamily: 'Orbitron, sans-serif',
+            fontSize: '12px',
+            fontWeight: 700,
+            color: '#00f0ff',
+            letterSpacing: '1px',
+            marginBottom: '12px',
+            textTransform: 'uppercase',
+          }}
+        >
+          🛸 Satellites (subtasks)
+        </h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {SATELLITE_ITEMS.map((s) => (
+            <div
+              key={s.type}
+              draggable
+              onDragStart={(e) =>
+                handleDragStart(e, { entityType: 'subtask', spacecraftType: s.type })
+              }
+              style={{
+                padding: '10px 14px',
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(0, 240, 255, 0.3)',
+                borderRadius: '10px',
+                cursor: 'grab',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+              }}
+            >
+              <SatelliteIcon type={s.type} size="sm" />
+              <span style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{s.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // module-zoom: Moons first, then Asteroids (minitasks), then Satellites
   return (
     <div
+      className="scrollbar-cosmic"
       style={{
         width: 220,
         flexShrink: 0,
@@ -138,46 +366,9 @@ export function GalaxyPalette({ viewType, onDragStart }: GalaxyPaletteProps) {
           textTransform: 'uppercase',
         }}
       >
-        🛸 Satellites (subtasks)
-      </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-        {SATELLITE_ITEMS.map((s) => (
-          <div
-            key={s.type}
-            draggable
-            onDragStart={(e) =>
-              handleDragStart(e, { entityType: 'subtask', spacecraftType: s.type })
-            }
-            style={{
-              padding: '10px 14px',
-              background: 'rgba(0, 0, 0, 0.3)',
-              border: '1px solid rgba(0, 240, 255, 0.3)',
-              borderRadius: '10px',
-              cursor: 'grab',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-            }}
-          >
-            <SatelliteIcon type={s.type} size="sm" />
-            <span style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{s.name}</span>
-          </div>
-        ))}
-      </div>
-      <h3
-        style={{
-          fontFamily: 'Orbitron, sans-serif',
-          fontSize: '12px',
-          fontWeight: 700,
-          color: '#00f0ff',
-          letterSpacing: '1px',
-          marginBottom: '12px',
-          textTransform: 'uppercase',
-        }}
-      >
         🌙 Moons (tasks)
       </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
         {MOON_ITEMS.map((m) => (
           <div
             key={m.type}
@@ -198,6 +389,80 @@ export function GalaxyPalette({ viewType, onDragStart }: GalaxyPaletteProps) {
           >
             <span style={{ fontSize: '20px' }}>{m.icon}</span>
             <span style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{m.name}</span>
+          </div>
+        ))}
+      </div>
+      <h3
+        style={{
+          fontFamily: 'Orbitron, sans-serif',
+          fontSize: '12px',
+          fontWeight: 700,
+          color: '#00f0ff',
+          letterSpacing: '1px',
+          marginBottom: '12px',
+          textTransform: 'uppercase',
+        }}
+      >
+        🪨 Asteroids (minitasks)
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
+        {ASTEROID_ITEMS.map((a) => (
+          <div
+            key={a.type}
+            draggable
+            onDragStart={(e) =>
+              handleDragStart(e, { entityType: 'minitask', asteroidType: a.type })
+            }
+            style={{
+              padding: '10px 14px',
+              background: 'rgba(0, 0, 0, 0.3)',
+              border: '1px solid rgba(139, 92, 46, 0.5)',
+              borderRadius: '10px',
+              cursor: 'grab',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+            }}
+          >
+            <span style={{ fontSize: '20px' }}>{a.icon}</span>
+            <span style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{a.name}</span>
+          </div>
+        ))}
+      </div>
+      <h3
+        style={{
+          fontFamily: 'Orbitron, sans-serif',
+          fontSize: '12px',
+          fontWeight: 700,
+          color: '#00f0ff',
+          letterSpacing: '1px',
+          marginBottom: '12px',
+          textTransform: 'uppercase',
+        }}
+      >
+        🛸 Satellites (subtasks)
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {SATELLITE_ITEMS.map((s) => (
+          <div
+            key={s.type}
+            draggable
+            onDragStart={(e) =>
+              handleDragStart(e, { entityType: 'subtask', spacecraftType: s.type })
+            }
+            style={{
+              padding: '10px 14px',
+              background: 'rgba(0, 0, 0, 0.3)',
+              border: '1px solid rgba(0, 240, 255, 0.3)',
+              borderRadius: '10px',
+              cursor: 'grab',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+            }}
+          >
+            <SatelliteIcon type={s.type} size="sm" />
+            <span style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{s.name}</span>
           </div>
         ))}
       </div>

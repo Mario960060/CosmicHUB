@@ -5,8 +5,10 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { useCreateTask } from '@/lib/pm/mutations';
+import { DatePicker } from '@/components/ui/DatePicker';
 import { X } from 'lucide-react';
 import { z } from 'zod';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const taskSchema = z.object({
   name: z.string().min(2).max(200),
@@ -31,6 +33,7 @@ interface CreateTaskDialogProps {
 }
 
 export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftType, onSuccess }: CreateTaskDialogProps) {
+  const { confirm, ConfirmDialog: ConfirmDialogEl } = useConfirm();
   const { user } = useAuth();
   const createTask = useCreateTask();
   const [name, setName] = useState('');
@@ -51,6 +54,22 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
     }
   }, [open, initialSpacecraftType]);
 
+  const hasUnsavedChanges = name.trim() || description.trim() || estimatedHours || dueDate;
+
+  const handleClose = async () => {
+    if (hasUnsavedChanges) {
+      const confirmed = await confirm({
+        title: 'Niezapisane zmiany',
+        message: 'Czy na pewno chcesz wyjść? Niezapisane zmiany zostaną utracone.',
+        confirmLabel: 'Wyjdź',
+        cancelLabel: 'Zostań',
+        variant: 'warning',
+      });
+      if (!confirmed) return;
+    }
+    onClose();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -67,7 +86,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
         moduleId,
         name,
         description: description || undefined,
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : null,
         priorityStars: parseFloat(priorityStars),
         createdBy: user.id,
         spacecraftType,
@@ -105,7 +124,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
     <>
       {/* Backdrop */}
       <div 
-        onClick={onClose}
+        onClick={handleClose}
         style={{
           position: 'fixed',
           inset: 0,
@@ -125,6 +144,9 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
             position: 'relative',
             width: '100%',
             maxWidth: '600px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
             background: 'rgba(21, 27, 46, 0.95)',
             backdropFilter: 'blur(30px)',
             border: '1px solid rgba(0, 217, 255, 0.3)',
@@ -171,7 +193,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
               <span>🛸</span> Create Task
             </h2>
             <button
-              onClick={onClose}
+              onClick={handleClose}
               onMouseEnter={() => setHoveredClose(true)}
               onMouseLeave={() => setHoveredClose(false)}
               style={{
@@ -193,7 +215,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
           </div>
 
           {/* Body */}
-          <form onSubmit={handleSubmit} style={{ padding: '32px' }}>
+          <form onSubmit={handleSubmit} className="scrollbar-cosmic" style={{ padding: '32px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0 }}>
             {/* Task Name */}
             <div style={{ marginBottom: '24px' }}>
               <label style={{
@@ -285,22 +307,11 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
               }}>
                 Due Date
               </label>
-              <input
-                type="date"
+              <DatePicker
                 value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  border: '1px solid rgba(0, 217, 255, 0.3)',
-                  borderRadius: '12px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  outline: 'none',
-                  colorScheme: 'dark',
-                  fontFamily: 'inherit',
-                }}
+                onChange={setDueDate}
+                placeholder="Select date"
+                usePortal
               />
             </div>
 
@@ -577,6 +588,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
           color: rgba(255, 255, 255, 0.3);
         }
       `}</style>
+      {ConfirmDialogEl}
     </>
   );
 }

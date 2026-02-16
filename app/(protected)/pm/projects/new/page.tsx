@@ -15,7 +15,7 @@ import { z } from 'zod';
 
 const projectSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
-  description: z.string().max(1000).optional(),
+  description: z.string().optional(),
   clientId: z.string().optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
@@ -235,15 +235,20 @@ export default function NewProjectPage() {
         )}
 
         {/* Form Card */}
-        <div style={{
-          position: 'relative',
-          background: 'rgba(21, 27, 46, 0.6)',
-          backdropFilter: 'blur(20px)',
-          border: '1px solid rgba(0, 217, 255, 0.2)',
-          borderRadius: '20px',
-          padding: '32px',
-          overflow: 'hidden',
-        }}>
+        <div
+          className="scrollbar-cosmic"
+          style={{
+            position: 'relative',
+            background: 'rgba(21, 27, 46, 0.6)',
+            backdropFilter: 'blur(20px)',
+            border: '1px solid rgba(0, 217, 255, 0.2)',
+            borderRadius: '20px',
+            padding: '32px',
+            maxHeight: 'calc(100vh - 200px)',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+          }}
+        >
           {/* Glow */}
           <div style={{
             position: 'absolute',
@@ -603,7 +608,6 @@ export default function NewProjectPage() {
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Automate product listings and inventory management"
                 rows={4}
-                maxLength={1000}
                 onFocus={() => setFocusedInput('description')}
                 onBlur={() => setFocusedInput(null)}
                 style={{
@@ -635,7 +639,7 @@ export default function NewProjectPage() {
                 marginTop: '6px',
                 textAlign: 'right',
               }}>
-                {description.length}/1000 characters
+                {description.length} characters
               </p>
               {errors.description && (
                 <p style={{

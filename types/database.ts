@@ -180,12 +180,66 @@ export interface Database {
           updated_at?: string;
         };
       };
+      minitasks: {
+        Row: {
+          id: string;
+          task_id: string | null;
+          module_id: string | null;
+          name: string;
+          description: string | null;
+          estimated_hours: number | null;
+          status: 'todo' | 'in_progress' | 'done' | 'blocked';
+          priority_stars: number;
+          asteroid_type: string;
+          assigned_to: string | null;
+          due_date: string | null;
+          progress_percent: number | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          task_id?: string | null;
+          module_id?: string | null;
+          name: string;
+          description?: string | null;
+          estimated_hours?: number | null;
+          status?: 'todo' | 'in_progress' | 'done' | 'blocked';
+          priority_stars?: number;
+          asteroid_type?: string;
+          assigned_to?: string | null;
+          due_date?: string | null;
+          progress_percent?: number | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          task_id?: string | null;
+          module_id?: string | null;
+          name?: string;
+          description?: string | null;
+          estimated_hours?: number | null;
+          status?: 'todo' | 'in_progress' | 'done' | 'blocked';
+          priority_stars?: number;
+          asteroid_type?: string;
+          assigned_to?: string | null;
+          due_date?: string | null;
+          progress_percent?: number | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       subtasks: {
         Row: {
           id: string;
           parent_id: string | null;
           module_id: string | null;
           project_id: string | null;
+          minitask_id: string | null;
           name: string;
           description: string | null;
           estimated_hours: number | null;
@@ -206,6 +260,7 @@ export interface Database {
           parent_id?: string | null;
           module_id?: string | null;
           project_id?: string | null;
+          minitask_id?: string | null;
           name: string;
           description?: string | null;
           estimated_hours?: number | null;
@@ -226,6 +281,7 @@ export interface Database {
           parent_id?: string | null;
           module_id?: string | null;
           project_id?: string | null;
+          minitask_id?: string | null;
           name?: string;
           description?: string | null;
           estimated_hours?: number | null;

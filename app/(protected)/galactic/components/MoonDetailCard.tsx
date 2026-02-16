@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createClient } from '@/lib/supabase/client';
 import { useTaskMembers, useProjectMembers, useModuleMembers, useDependenciesForSubtasks } from '@/lib/pm/queries';
 import { useAuth } from '@/hooks/use-auth';
-import { X, Plus, UsersRound, Layers, GitBranch, UserPlus } from 'lucide-react';
+import { X, Plus, UsersRound, Layers, GitBranch, UserPlus, Telescope } from 'lucide-react';
 import { SubtaskTypeIcon } from '@/components/satellite/SubtaskTypeIcon';
 import { AddProgressDialog } from './AddProgressDialog';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -27,6 +27,7 @@ import {
 interface MoonDetailCardProps {
   taskId: string;
   onClose: () => void;
+  onZoomIn?: (moduleId: string) => void;
 }
 
 interface TaskWithSubtasks {
@@ -81,7 +82,7 @@ function useMoonDetails(taskId: string | null) {
   });
 }
 
-export function MoonDetailCard({ taskId, onClose }: MoonDetailCardProps) {
+export function MoonDetailCard({ taskId, onClose, onZoomIn }: MoonDetailCardProps) {
   const { user } = useAuth();
   const [showAddProgress, setShowAddProgress] = useState(false);
   const [showAssignTeam, setShowAssignTeam] = useState(false);
@@ -245,7 +246,7 @@ export function MoonDetailCard({ taskId, onClose }: MoonDetailCardProps) {
         </div>
 
         {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="scrollbar-cosmic" style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: statusStyle.bg, color: statusStyle.color }}>
               {statusStyle.text}
@@ -402,7 +403,7 @@ export function MoonDetailCard({ taskId, onClose }: MoonDetailCardProps) {
           </CollapsibleSection>
         </div>
 
-        {/* Sticky footer */}
+        {/* Sticky footer: Zoom In, Add progress, Assign Team — w jednej linii */}
         <div
           style={{
             flexShrink: 0,
@@ -414,14 +415,39 @@ export function MoonDetailCard({ taskId, onClose }: MoonDetailCardProps) {
             borderTop: `1px solid ${cardTheme.border.replace('0.3', '0.2')}`,
             display: 'flex',
             gap: 12,
-            flexWrap: 'wrap',
+            flexWrap: 'nowrap',
+            alignItems: 'center',
+            overflowX: 'auto',
           }}
         >
+          {onZoomIn && moduleId && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(); onZoomIn(moduleId); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexShrink: 0,
+                gap: 8,
+                padding: '12px 20px',
+                background: cardTheme.accent,
+                border: `1px solid ${cardTheme.border}`,
+                borderRadius: 10,
+                color: cardTheme.header,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              <Telescope size={18} />
+              Zoom In
+            </button>
+          )}
           <button
             onClick={() => setShowAddProgress(true)}
             style={{
               display: 'flex',
               alignItems: 'center',
+              flexShrink: 0,
               gap: 8,
               padding: '12px 20px',
               background: cardTheme.accent,
@@ -442,6 +468,7 @@ export function MoonDetailCard({ taskId, onClose }: MoonDetailCardProps) {
               style={{
                 display: 'flex',
                 alignItems: 'center',
+                flexShrink: 0,
                 gap: 8,
                 padding: '12px 20px',
                 background: cardTheme.accent,

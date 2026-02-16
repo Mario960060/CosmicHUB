@@ -5,8 +5,8 @@
 import { useState } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { useSearchParams } from 'next/navigation';
-import { useWorkstationTasks } from '@/lib/workstation/queries';
-import type { TaskWithDetails } from '@/lib/workstation/queries';
+import { useWorkstationTasks, useWorkstationMinitasks } from '@/lib/workstation/queries';
+import type { TaskWithDetails, MinitaskWithDetails } from '@/lib/workstation/queries';
 import { Search, Wrench, X, FileText } from 'lucide-react';
 import { SubtaskTypeIcon } from '@/components/satellite/SubtaskTypeIcon';
 import { SatelliteDetailPanel } from '@/components/satellite/SatelliteDetailPanel';
@@ -18,19 +18,25 @@ export default function WorkstationPage() {
   const searchParams = useSearchParams();
   const initialTaskId = searchParams.get('task') || null;
 
+  const [activeTab, setActiveTab] = useState<'tasks' | 'sub-tasks'>('tasks');
   const [filter, setFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTaskId);
+  const [selectedMinitaskId, setSelectedMinitaskId] = useState<string | null>(null);
   const [selectedSubtaskId, setSelectedSubtaskId] = useState<string | null>(null);
   const [hoveredFilter, setHoveredFilter] = useState<string | null>(null);
   const [hoveredTask, setHoveredTask] = useState<string | null>(null);
 
   const { data: allTasks } = useWorkstationTasks();
+  const { data: allMinitasks } = useWorkstationMinitasks();
 
   const isTaskMember = (task: TaskWithDetails) =>
     task.task_members?.some((m) => m.user_id === user?.id) ?? false;
   const hasNoMembers = (task: TaskWithDetails) =>
     !task.task_members || task.task_members.length === 0;
+
+  const isMinitaskAssigned = (mt: MinitaskWithDetails) => mt.assigned_to === user?.id;
+  const hasNoMinitaskAssignee = (mt: MinitaskWithDetails) => !mt.assigned_to;
 
   const filteredTasks =
     allTasks?.filter((task) => {
@@ -40,8 +46,19 @@ export default function WorkstationPage() {
       return matchesSearch;
     }) ?? [];
 
+  const filteredMinitasks =
+    allMinitasks?.filter((mt) => {
+      const matchesSearch = mt.name.toLowerCase().includes(searchQuery.toLowerCase());
+      if (filter === 'my-tasks') return matchesSearch && isMinitaskAssigned(mt);
+      if (filter === 'available') return matchesSearch && hasNoMinitaskAssignee(mt);
+      return matchesSearch;
+    }) ?? [];
+
   const selectedTask = selectedTaskId
     ? filteredTasks.find((t) => t.id === selectedTaskId)
+    : null;
+  const selectedMinitask = selectedMinitaskId
+    ? filteredMinitasks.find((m) => m.id === selectedMinitaskId)
     : null;
 
   const getTaskProgress = (task: TaskWithDetails) => {
@@ -58,6 +75,31 @@ export default function WorkstationPage() {
         return acc + logs.reduce((s, w) => s + (w.hours_spent || 0), 0);
       }, 0) ?? 0
     );
+  };
+
+  const getMinitaskProgress = (mt: MinitaskWithDetails) => {
+    const subs = mt.subtasks || [];
+    if (subs.length === 0) return mt.progress_percent ?? 0;
+    const done = subs.filter((s) => s.status === 'done').length;
+    return Math.round((done / subs.length) * 100);
+  };
+
+  const getMinitaskLoggedHours = (mt: MinitaskWithDetails) => {
+    return (
+      mt.subtasks?.reduce((acc, st) => {
+        const logs = (st as { work_logs?: { hours_spent: number }[] }).work_logs || [];
+        return acc + logs.reduce((s, w) => s + (w.hours_spent || 0), 0);
+      }, 0) ?? 0
+    );
+  };
+
+  const getMinitaskParentName = (mt: MinitaskWithDetails) => {
+    if (mt.task?.module?.project?.name && mt.task?.module?.name && mt.task?.name)
+      return `${mt.task.module.project.name} › ${mt.task.module.name} › ${mt.task.name}`;
+    if (mt.module?.project?.name && mt.module?.name)
+      return `${mt.module.project.name} › ${mt.module.name}`;
+    if (mt.project?.name) return mt.project.name;
+    return '—';
   };
 
   return (
@@ -126,19 +168,47 @@ export default function WorkstationPage() {
                 background: 'rgba(0, 217, 255, 0.05)',
               }}
             >
-              <h2
+              <div
                 style={{
-                  fontSize: '20px',
-                  fontFamily: 'Orbitron, sans-serif',
-                  color: '#00d9ff',
-                  marginBottom: '16px',
                   display: 'flex',
-                  alignItems: 'center',
                   gap: '8px',
+                  marginBottom: '16px',
+                  borderBottom: '1px solid rgba(0, 217, 255, 0.15)',
+                  paddingBottom: '12px',
                 }}
               >
-                <span>📋</span> Tasks
-              </h2>
+                {[
+                  { key: 'tasks' as const, label: 'Tasks' },
+                  { key: 'sub-tasks' as const, label: 'Sub-tasks' },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => {
+                      setActiveTab(tab.key);
+                      setSelectedTaskId(null);
+                      setSelectedMinitaskId(null);
+                    }}
+                    style={{
+                      padding: '8px 20px',
+                      background: activeTab === tab.key ? 'rgba(0, 217, 255, 0.2)' : 'transparent',
+                      border:
+                        activeTab === tab.key
+                          ? '1px solid rgba(0, 217, 255, 0.5)'
+                          : '1px solid rgba(0, 217, 255, 0.2)',
+                      borderRadius: '10px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      fontFamily: 'Orbitron, sans-serif',
+                      color: activeTab === tab.key ? '#00d9ff' : 'rgba(255, 255, 255, 0.6)',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      boxShadow: activeTab === tab.key ? '0 0 20px rgba(0, 217, 255, 0.3)' : 'none',
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
 
               <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                 {[
@@ -178,7 +248,7 @@ export default function WorkstationPage() {
                 ))}
               </div>
 
-              <div style={{ position: 'relative' }}>
+              <div style={{ position: 'relative', width: '100%', boxSizing: 'border-box' }}>
                 <Search
                   size={16}
                   style={{
@@ -191,12 +261,13 @@ export default function WorkstationPage() {
                 />
                 <input
                   type="text"
-                  placeholder="Search tasks..."
+                  placeholder={activeTab === 'tasks' ? 'Search tasks...' : 'Search sub-tasks...'}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '10px 12px 10px 36px',
+                    boxSizing: 'border-box',
+                    padding: '10px 16px 10px 36px',
                     background: 'rgba(0, 0, 0, 0.3)',
                     border: '1px solid rgba(0, 217, 255, 0.2)',
                     borderRadius: '10px',
@@ -208,8 +279,8 @@ export default function WorkstationPage() {
               </div>
             </div>
 
-            <div style={{ padding: '16px', flex: 1, overflowY: 'auto' }}>
-              {filteredTasks.length > 0 ? (
+            <div className="scrollbar-cosmic" style={{ padding: '16px', flex: 1, overflowY: 'auto' }}>
+              {activeTab === 'tasks' && filteredTasks.length > 0 ? (
                 filteredTasks.map((task) => {
                   const isActive = selectedTaskId === task.id;
                   const isHovered = hoveredTask === task.id;
@@ -220,7 +291,10 @@ export default function WorkstationPage() {
                   return (
                     <div
                       key={task.id}
-                      onClick={() => setSelectedTaskId(task.id)}
+                      onClick={() => {
+                        setSelectedTaskId(task.id);
+                        setSelectedMinitaskId(null);
+                      }}
                       onMouseEnter={() => setHoveredTask(task.id)}
                       onMouseLeave={() => setHoveredTask(null)}
                       style={{
@@ -341,6 +415,139 @@ export default function WorkstationPage() {
                     </div>
                   );
                 })
+              ) : activeTab === 'sub-tasks' && filteredMinitasks.length > 0 ? (
+                filteredMinitasks.map((mt) => {
+                  const isActive = selectedMinitaskId === mt.id;
+                  const isHovered = hoveredTask === mt.id;
+                  const progress = getMinitaskProgress(mt);
+                  const loggedHours = getMinitaskLoggedHours(mt);
+                  const subCount = mt.subtasks?.length ?? 0;
+
+                  return (
+                    <div
+                      key={mt.id}
+                      onClick={() => {
+                        setSelectedMinitaskId(mt.id);
+                        setSelectedTaskId(null);
+                      }}
+                      onMouseEnter={() => setHoveredTask(mt.id)}
+                      onMouseLeave={() => setHoveredTask(null)}
+                      style={{
+                        position: 'relative',
+                        background: isActive
+                          ? 'rgba(0, 217, 255, 0.1)'
+                          : isHovered
+                            ? 'rgba(0, 217, 255, 0.05)'
+                            : 'rgba(0, 0, 0, 0.3)',
+                        border: isActive
+                          ? '1px solid rgba(0, 217, 255, 0.6)'
+                          : isHovered
+                            ? '1px solid rgba(0, 217, 255, 0.4)'
+                            : '1px solid rgba(0, 217, 255, 0.15)',
+                        borderRadius: '12px',
+                        padding: '16px',
+                        marginBottom: '12px',
+                        cursor: 'pointer',
+                        transition: 'all 0.3s ease',
+                        transform: isHovered ? 'translateX(4px)' : 'translateX(0)',
+                        boxShadow: isActive ? '0 0 20px rgba(0, 217, 255, 0.2)' : 'none',
+                      }}
+                    >
+                      {isActive && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            width: '3px',
+                            height: '60%',
+                            background: '#00d9ff',
+                            borderRadius: '0 3px 3px 0',
+                            boxShadow: '0 0 10px #00d9ff',
+                          }}
+                        />
+                      )}
+                      <div style={{ marginBottom: '10px' }}>
+                        <h3
+                          style={{
+                            fontSize: '14px',
+                            color: '#00d9ff',
+                            fontWeight: '600',
+                            marginBottom: '6px',
+                            margin: 0,
+                          }}
+                        >
+                          {mt.name}
+                        </h3>
+                        <div style={{ display: 'flex', gap: '2px' }}>
+                          {[1, 2, 3].map((star) => (
+                            <svg
+                              key={star}
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill={
+                                star <= (mt.priority_stars || 1) ? '#fbbf24' : 'rgba(251,191,36,0.2)'
+                              }
+                              style={{
+                                filter:
+                                  star <= (mt.priority_stars || 1)
+                                    ? 'drop-shadow(0 0 3px #fbbf24)'
+                                    : 'none',
+                              }}
+                            >
+                              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                            </svg>
+                          ))}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontSize: '11px',
+                          flexWrap: 'wrap',
+                          gap: 4,
+                        }}
+                      >
+                        <span
+                          style={{
+                            padding: '3px 8px',
+                            borderRadius: '8px',
+                            fontSize: '10px',
+                            fontWeight: '700',
+                            textTransform: 'uppercase',
+                            background:
+                              mt.status === 'in_progress'
+                                ? 'rgba(0, 217, 255, 0.2)'
+                                : mt.status === 'done'
+                                  ? 'rgba(16, 185, 129, 0.2)'
+                                  : 'rgba(100, 116, 139, 0.3)',
+                            border:
+                              mt.status === 'in_progress'
+                                ? '1px solid rgba(0, 217, 255, 0.4)'
+                                : mt.status === 'done'
+                                  ? '1px solid rgba(16, 185, 129, 0.4)'
+                                  : 'none',
+                            color:
+                              mt.status === 'in_progress'
+                                ? '#00d9ff'
+                                : mt.status === 'done'
+                                  ? '#10b981'
+                                  : '#94a3b8',
+                          }}
+                        >
+                          {getStatusLabel(mt.status)}
+                        </span>
+                        <span style={{ color: 'rgba(255, 255, 255, 0.4)' }}>
+                          {subCount} subtasks · {Math.round(loggedHours * 10) / 10}h · {progress}%
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
               ) : (
                 <div
                   style={{
@@ -349,7 +556,13 @@ export default function WorkstationPage() {
                     color: 'rgba(255, 255, 255, 0.3)',
                   }}
                 >
-                  {searchQuery ? 'No tasks found' : 'No tasks available'}
+                  {searchQuery
+                    ? activeTab === 'tasks'
+                      ? 'No tasks found'
+                      : 'No sub-tasks found'
+                    : activeTab === 'tasks'
+                      ? 'No tasks available'
+                      : 'No sub-tasks available'}
                 </div>
               )}
             </div>
@@ -382,7 +595,7 @@ export default function WorkstationPage() {
               }}
             />
 
-            {selectedTask ? (
+            {(activeTab === 'tasks' && selectedTask) || (activeTab === 'sub-tasks' && selectedMinitask) ? (
               <div
                 style={{
                   flex: 1,
@@ -393,44 +606,46 @@ export default function WorkstationPage() {
                   zIndex: 1,
                 }}
               >
-                {/* Task header */}
-                <div
-                  style={{
-                    padding: '24px',
-                    borderBottom: '1px solid rgba(0, 217, 255, 0.2)',
-                    background: 'rgba(0, 217, 255, 0.05)',
-                  }}
-                >
-                  <h3
-                    style={{
-                      fontSize: '20px',
-                      fontFamily: 'Orbitron, sans-serif',
-                      color: '#00d9ff',
-                      margin: '0 0 8px 0',
-                    }}
-                  >
-                    {selectedTask.name}
-                  </h3>
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 12,
-                      flexWrap: 'wrap',
-                      fontSize: 13,
-                      color: 'rgba(255, 255, 255, 0.7)',
-                    }}
-                  >
-                    <span>{selectedTask.module?.project?.name ?? '—'}</span>
-                    <span>›</span>
-                    <span>{selectedTask.module?.name ?? '—'}</span>
-                    <span style={{ marginLeft: 'auto' }}>
-                      {selectedTask.task_members?.length ?? 0} assigned
-                    </span>
-                  </div>
-                </div>
+                {activeTab === 'tasks' && selectedTask ? (
+                  <>
+                    {/* Task header */}
+                    <div
+                      style={{
+                        padding: '24px',
+                        borderBottom: '1px solid rgba(0, 217, 255, 0.2)',
+                        background: 'rgba(0, 217, 255, 0.05)',
+                      }}
+                    >
+                      <h3
+                        style={{
+                          fontSize: '20px',
+                          fontFamily: 'Orbitron, sans-serif',
+                          color: '#00d9ff',
+                          margin: '0 0 8px 0',
+                        }}
+                      >
+                        {selectedTask.name}
+                      </h3>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 12,
+                          flexWrap: 'wrap',
+                          fontSize: 13,
+                          color: 'rgba(255, 255, 255, 0.7)',
+                        }}
+                      >
+                        <span>{selectedTask.module?.project?.name ?? '—'}</span>
+                        <span>›</span>
+                        <span>{selectedTask.module?.name ?? '—'}</span>
+                        <span style={{ marginLeft: 'auto' }}>
+                          {selectedTask.task_members?.length ?? 0} assigned
+                        </span>
+                      </div>
+                    </div>
 
-                {/* Description - above subtasks */}
-                {selectedTask.description && (
+                    {/* Description - above subtasks */}
+                    {selectedTask.description && (
                   <div
                     style={{
                       padding: '16px 24px',
@@ -458,7 +673,7 @@ export default function WorkstationPage() {
                 )}
 
                 {/* Subtasks list */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+                <div className="scrollbar-cosmic" style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
                   <h4
                     style={{
                       fontSize: 14,
@@ -606,6 +821,134 @@ export default function WorkstationPage() {
                     </>
                   )}
                 </div>
+                  </>
+                ) : selectedMinitask ? (
+                  <>
+                    {/* Minitask (Sub-task) header */}
+                    <div
+                      style={{
+                        padding: '24px',
+                        borderBottom: '1px solid rgba(0, 217, 255, 0.2)',
+                        background: 'rgba(0, 217, 255, 0.05)',
+                      }}
+                    >
+                      <h3
+                        style={{
+                          fontSize: '20px',
+                          fontFamily: 'Orbitron, sans-serif',
+                          color: '#00d9ff',
+                          margin: '0 0 8px 0',
+                        }}
+                      >
+                        {selectedMinitask.name}
+                      </h3>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 12,
+                          flexWrap: 'wrap',
+                          fontSize: 13,
+                          color: 'rgba(255, 255, 255, 0.7)',
+                        }}
+                      >
+                        <span>{getMinitaskParentName(selectedMinitask)}</span>
+                      </div>
+                    </div>
+
+                    {selectedMinitask.description && (
+                      <div
+                        style={{
+                          padding: '16px 24px',
+                          borderBottom: '1px solid rgba(0, 217, 255, 0.15)',
+                          background: 'rgba(0, 217, 255, 0.03)',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 10,
+                            fontSize: 14,
+                            color: 'rgba(255, 255, 255, 0.85)',
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          <FileText
+                            size={18}
+                            style={{ color: 'rgba(0, 217, 255, 0.7)', flexShrink: 0, marginTop: 2 }}
+                          />
+                          <span>{selectedMinitask.description}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="scrollbar-cosmic" style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+                      <h4
+                        style={{
+                          fontSize: 14,
+                          color: 'rgba(0, 217, 255, 0.8)',
+                          marginBottom: 12,
+                          textTransform: 'uppercase',
+                          letterSpacing: 1,
+                        }}
+                      >
+                        Subtasks
+                      </h4>
+                      {selectedMinitask.subtasks && selectedMinitask.subtasks.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {selectedMinitask.subtasks.map((st) => {
+                            const stWithLogs = st as {
+                              id: string;
+                              name: string;
+                              status: string;
+                              work_logs?: { hours_spent: number }[];
+                            };
+                            const hours =
+                              stWithLogs.work_logs?.reduce((s, w) => s + (w.hours_spent || 0), 0) ?? 0;
+                            return (
+                              <button
+                                key={st.id}
+                                onClick={() => setSelectedSubtaskId(st.id)}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 12,
+                                  width: '100%',
+                                  padding: '12px 16px',
+                                  background: 'rgba(0, 217, 255, 0.05)',
+                                  border: '1px solid rgba(0, 217, 255, 0.2)',
+                                  borderRadius: 10,
+                                  color: '#fff',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  fontSize: 14,
+                                }}
+                              >
+                                <SubtaskTypeIcon
+                                  satelliteType={(st as { satellite_type?: string }).satellite_type}
+                                  size={14}
+                                />
+                                <span style={{ flex: 1 }}>{st.name}</span>
+                                <span
+                                  style={{
+                                    fontSize: 11,
+                                    color: 'rgba(255,255,255,0.5)',
+                                  }}
+                                >
+                                  {getStatusLabel(st.status)} · {Math.round(hours * 10) / 10}h
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div style={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: 13 }}>
+                          No subtasks yet.
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : null}
               </div>
             ) : (
               <div
@@ -626,10 +969,10 @@ export default function WorkstationPage() {
                     marginBottom: '8px',
                   }}
                 >
-                  Select a task to view details
+                  {activeTab === 'tasks' ? 'Select a task to view details' : 'Select a sub-task to view details'}
                 </h3>
                 <p style={{ fontSize: '14px', color: 'rgba(255, 255, 255, 0.3)' }}>
-                  Choose a task from the left panel
+                  {activeTab === 'tasks' ? 'Choose a task from the left panel' : 'Choose a sub-task from the left panel'}
                 </p>
               </div>
             )}
@@ -694,7 +1037,7 @@ export default function WorkstationPage() {
                 <X size={18} />
               </button>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto' }}>
+            <div className="scrollbar-cosmic" style={{ flex: 1, overflowY: 'auto' }}>
               <SatelliteDetailPanel subtaskId={selectedSubtaskId} />
             </div>
           </div>

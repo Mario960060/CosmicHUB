@@ -7,22 +7,24 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { CanvasObject, Dependency } from '@/lib/galactic/types';
 
-const CANVAS_WIDTH = 1920;
-const CANVAS_HEIGHT = 1080;
+const CANVAS_WIDTH = 4800;
+const CANVAS_HEIGHT = 2700;
 
 interface GalacticSceneProps {
   objects: CanvasObject[];
   dependencies: Dependency[];
-  viewType: 'galaxy' | 'solar-system' | 'module-zoom';
+  viewType: 'galaxy' | 'solar-system' | 'module-zoom' | 'task-zoom' | 'minitask-zoom';
   onObjectClick?: (object: CanvasObject) => void;
   onObjectContextMenu?: (object: CanvasObject, e: React.MouseEvent) => void;
   onPortalClick?: (moduleId: string) => void;
+  onTaskPortalClick?: (taskId: string) => void;
+  onMinitaskPortalClick?: (minitaskId: string) => void;
   onCanvasBackgroundClick?: () => void;
   isEditMode?: boolean;
   selectedObjectId?: string | null;
   selectedObjectIds?: Set<string>;
   connectionModeForSubtaskId?: string | null;
-  connectionModeSource?: { entityId: string; entityType: 'module' | 'task' | 'subtask' } | null;
+  connectionModeSource?: { entityId: string; entityType: 'module' | 'task' | 'subtask' | 'minitask' } | null;
   positionOverrides?: Map<string, { x: number; y: number }>;
   onPositionChange?: (objectId: string, x: number, y: number) => void;
 }
@@ -110,6 +112,8 @@ export function GalacticScene({
   onObjectClick,
   onObjectContextMenu,
   onPortalClick,
+  onTaskPortalClick,
+  onMinitaskPortalClick,
   onCanvasBackgroundClick,
   isEditMode = false,
   selectedObjectId = null,
@@ -217,6 +221,7 @@ export function GalacticScene({
 
   const handleObjectPointerDown = (obj: CanvasObject, e: React.PointerEvent) => {
     if (!isEditMode || !onPositionChange || e.button !== 0) return;
+    if (obj.metadata?.pinned) return;
     e.preventDefault();
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -306,7 +311,14 @@ export function GalacticScene({
         onMouseEnter={() => setHoveredObject(obj.id)}
         onMouseLeave={() => setHoveredObject(null)}
       >
-        <div className="sun-label">{obj.name}</div>
+        <div className="sun-labels-inset">
+          <div className="sun-name-label">{obj.name}</div>
+          {obj.metadata?.dueDateDays !== undefined && obj.metadata?.dueDateDays !== null && (
+            <div className="sun-deadline-label">
+              {formatDeadlineDays(obj.metadata.dueDateDays)}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -501,6 +513,33 @@ export function GalacticScene({
             </>
           );
 
+        case 'nexus-drone':
+          return (
+            <>
+              <div className="nd-data"></div>
+              <div className="nd-data"></div>
+              <div className="nd-data"></div>
+              <div className="nd-conn nd-conn-top"></div>
+              <div className="nd-conn nd-conn-right"></div>
+              <div className="nd-conn nd-conn-bottom"></div>
+              <div className="nd-conn nd-conn-left"></div>
+              <div className="nd-node nd-node-tr"></div>
+              <div className="nd-node nd-node-tl"></div>
+              <div className="nd-node nd-node-br"></div>
+              <div className="nd-node nd-node-bl"></div>
+              <div className="nd-arm nd-arm-tr"></div>
+              <div className="nd-arm nd-arm-tl"></div>
+              <div className="nd-arm nd-arm-br"></div>
+              <div className="nd-arm nd-arm-bl"></div>
+              <div className="nd-wing-t"></div>
+              <div className="nd-wing-b"></div>
+              <div className="nd-holo-ring2"></div>
+              <div className="nd-holo-ring"></div>
+              <div className="nd-core"></div>
+              <div className="nd-lens"></div>
+            </>
+          );
+
         default:
           return null;
       }
@@ -531,7 +570,7 @@ export function GalacticScene({
         onMouseLeave={() => setHoveredObject(null)}
       >
         {renderSatelliteContent()}
-        {!isMini && <div className="sat-name-label">{obj.name}</div>}
+        {!isMini && !obj.metadata?.hideName && <div className="sat-name-label">{obj.name}</div>}
         
         {obj.metadata?.isBlocked && (
           <div className="blocked-badge">!</div>
@@ -598,9 +637,11 @@ export function GalacticScene({
         })()}
         {renderStarsCrown(obj.metadata?.priorityStars ?? 1, isMini ? 'sm' : 'md')}
         <div className="moon-labels-inset">
-          <div className="moon-name-label" style={{ fontSize: isMini ? '8px' : '12px' }}>
-            {obj.name}
-          </div>
+          {!isMini && (
+            <div className="moon-name-label" style={{ fontSize: '12px' }}>
+              {obj.name}
+            </div>
+          )}
           {obj.metadata?.dueDateDays !== undefined && obj.metadata?.dueDateDays !== null && (
             <div className="moon-deadline-label" style={{ fontSize: isMini ? '7px' : '10px' }}>
               {formatDeadlineDays(obj.metadata.dueDateDays)}
@@ -618,18 +659,94 @@ export function GalacticScene({
     );
   };
 
-  // Render Portal (galaxy vortex - navigates to another module)
-  const renderPortal = (obj: CanvasObject) => {
-    const targetModuleId = obj.metadata?.portalTargetModuleId;
-    const targetName = obj.metadata?.portalTargetModuleName || 'Portal';
-    const portalColor = obj.metadata?.portalTargetModuleColor || obj.color || '#a855f7';
+  // Render Asteroid (Minitask)
+  const renderAsteroid = (obj: CanvasObject) => {
+    const type = (obj.metadata?.asteroidType || 'rocky').toLowerCase();
+    const isMini = obj.metadata?.isMiniature === true;
 
     return (
       <div
         key={obj.id}
         data-galactic-object
         data-object-id={obj.id}
-        data-portal-target={targetModuleId}
+        className={`asteroid ${type}${isMini ? ' sm' : ''}`}
+        style={{
+          left: `${pos(obj).x}px`,
+          top: `${pos(obj).y}px`,
+          transform: 'translate(-50%, -50%)',
+          ...(isSelected(obj.id) ? SELECTION_OUTLINE : {}),
+        }}
+        onClick={() => handleObjectClick(obj)}
+        onContextMenu={(e) => { e.preventDefault(); onObjectContextMenu?.(obj, e); }}
+        onPointerDown={(e) => handleObjectPointerDown(obj, e)}
+        onPointerMove={(e) => handleObjectPointerMove(obj, e)}
+        onPointerUp={(e) => handleObjectPointerUp(obj, e)}
+        onMouseEnter={() => setHoveredObject(obj.id)}
+        onMouseLeave={() => setHoveredObject(null)}
+      >
+        {type === 'rocky' && !isMini && (
+          <>
+            <div className="asteroid-crater cr1"></div>
+            <div className="asteroid-crater cr2"></div>
+            <div className="asteroid-crater cr3"></div>
+          </>
+        )}
+        <div
+          className="burnout-overlay"
+          style={{ opacity: (obj.progress ?? 0) / 100 }}
+        />
+        {(() => {
+          const glow = getDeadlineGlow(
+            obj.metadata?.dueDateDays,
+            obj.metadata?.isComplete ?? (obj.progress ?? 0) >= 100
+          );
+          return glow ? (
+            <div
+              className={`deadline-aura${glow.pulse ? ' deadline-pulse' : ''}`}
+              style={{
+                background: getAuraGradient(glow.color, glow.size),
+                width: `${glow.size}%`,
+                height: `${glow.size}%`,
+                opacity: glow.opacity,
+              }}
+            />
+          ) : null;
+        })()}
+        {renderStarsCrown(obj.metadata?.priorityStars ?? 1, isMini ? 'sm' : 'md')}
+        <div className="asteroid-labels-inset">
+          {!isMini && (
+            <div className="asteroid-name-label">{obj.name}</div>
+          )}
+          {obj.metadata?.dueDateDays !== undefined && obj.metadata?.dueDateDays !== null && (
+            <div className="asteroid-deadline-label" style={{ fontSize: isMini ? '7px' : '10px' }}>
+              {formatDeadlineDays(obj.metadata.dueDateDays)}
+            </div>
+          )}
+        </div>
+        {obj.metadata?.isBlocked && (
+          <div className="blocked-badge">!</div>
+        )}
+        {obj.metadata?.isComplete && (
+          <div className="complete-badge">✓</div>
+        )}
+      </div>
+    );
+  };
+
+  // Render Portal (galaxy vortex - navigates to another module or task)
+  const renderPortal = (obj: CanvasObject) => {
+    const targetModuleId = obj.metadata?.portalTargetModuleId;
+    const targetTaskId = obj.metadata?.portalTargetTaskId;
+    const targetMinitaskId = obj.metadata?.portalTargetMinitaskId;
+    const targetName = obj.metadata?.portalTargetMinitaskName ?? obj.metadata?.portalTargetTaskName ?? obj.metadata?.portalTargetModuleName ?? obj.name ?? 'Portal';
+    const portalColor = obj.metadata?.portalTargetModuleColor ?? obj.color ?? '#a855f7';
+
+    return (
+      <div
+        key={obj.id}
+        data-galactic-object
+        data-object-id={obj.id}
+        data-portal-target={targetMinitaskId ?? targetModuleId ?? targetTaskId}
         className="portal"
         style={{
           left: `${pos(obj).x}px`,
@@ -645,6 +762,10 @@ export function GalacticScene({
           }
           if (connectionModeSource) {
             onObjectClick?.(obj);
+          } else if (targetMinitaskId && onMinitaskPortalClick) {
+            onMinitaskPortalClick(targetMinitaskId);
+          } else if (targetTaskId && onTaskPortalClick) {
+            onTaskPortalClick(targetTaskId);
           } else if (targetModuleId && onPortalClick) {
             onPortalClick(targetModuleId);
           }
@@ -666,6 +787,135 @@ export function GalacticScene({
         <div className="portal-core" />
         <span className="portal-label">{targetName}</span>
       </div>
+    );
+  };
+
+  // Render module-to-task hierarchy links (solar system only) - cienkie szare linie
+  const renderModuleTaskLinks = () => {
+    if (viewType !== 'solar-system') return null;
+    const tasks = objects.filter((o) => o.type === 'task');
+    if (tasks.length === 0) return null;
+
+    return (
+      <svg
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 5,
+        }}
+      >
+        {tasks.map((task) => {
+          const moduleId = task.metadata?.moduleId;
+          if (!moduleId) return null;
+          const mod = objects.find((o) => o.type === 'module' && o.id === moduleId);
+          if (!mod) return null;
+          const from = pos(mod);
+          const to = pos(task);
+          return (
+            <line
+              key={`mod-task-${task.id}`}
+              x1={from.x}
+              y1={from.y}
+              x2={to.x}
+              y2={to.y}
+              stroke="rgba(150, 150, 150, 0.35)"
+              strokeWidth={1}
+              strokeDasharray="4 3"
+            />
+          );
+        })}
+      </svg>
+    );
+  };
+
+  // Render task-to-asteroid/satellite hierarchy links (module-zoom) - gray dashed lines
+  const renderTaskChildLinks = () => {
+    if (viewType !== 'module-zoom') return null;
+    const tasks = objects.filter((o) => o.type === 'task');
+    const minitasks = objects.filter((o) => o.type === 'minitask');
+    const subtasks = objects.filter((o) => o.type === 'subtask');
+    const children = [...minitasks, ...subtasks];
+    if (children.length === 0) return null;
+
+    return (
+      <svg
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 5,
+        }}
+      >
+        {children.map((child) => {
+          const taskId = child.metadata?.taskId;
+          if (!taskId) return null;
+          const task = objects.find((o) => o.type === 'task' && o.id === taskId);
+          if (!task) return null;
+          const from = pos(task);
+          const to = pos(child);
+          return (
+            <line
+              key={`task-child-${child.id}`}
+              x1={from.x}
+              y1={from.y}
+              x2={to.x}
+              y2={to.y}
+              stroke="rgba(150, 150, 150, 0.35)"
+              strokeWidth={1}
+              strokeDasharray="4 3"
+            />
+          );
+        })}
+      </svg>
+    );
+  };
+
+  // Render asteroid-to-subtask hierarchy links (task-zoom and minitask-zoom)
+  const renderAsteroidSubtaskLinks = () => {
+    if (viewType !== 'task-zoom' && viewType !== 'minitask-zoom') return null;
+    const subtasks = objects.filter((o) => o.type === 'subtask' && o.metadata?.minitaskId);
+    if (subtasks.length === 0) return null;
+
+    return (
+      <svg
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 5,
+        }}
+      >
+        {subtasks.map((subtask) => {
+          const minitaskId = subtask.metadata?.minitaskId;
+          if (!minitaskId) return null;
+          const asteroid = objects.find((o) => o.type === 'minitask' && o.id === minitaskId);
+          if (!asteroid) return null;
+          const from = pos(asteroid);
+          const to = pos(subtask);
+          return (
+            <line
+              key={`asteroid-sub-${subtask.id}`}
+              x1={from.x}
+              y1={from.y}
+              x2={to.x}
+              y2={to.y}
+              stroke="rgba(150, 150, 150, 0.35)"
+              strokeWidth={1}
+              strokeDasharray="4 3"
+            />
+          );
+        })}
+      </svg>
     );
   };
 
@@ -798,6 +1048,8 @@ export function GalacticScene({
       case 'subtask':
         // Subtasks = satellites (satelity) - orbit around moon
         return renderSatellite(obj);
+      case 'minitask':
+        return renderAsteroid(obj);
       case 'portal':
         return renderPortal(obj);
       default:
@@ -851,8 +1103,14 @@ export function GalacticScene({
         <div className="nebula n2"></div>
         <div className="nebula n3"></div>
 
-        {/* Dependencies (only in module zoom) */}
-        {viewType === 'module-zoom' && renderDependencies()}
+        {/* Module-task hierarchy links (solar system) */}
+        {renderModuleTaskLinks()}
+        {/* Task-child hierarchy links (module-zoom) */}
+        {renderTaskChildLinks()}
+        {/* Asteroid-subtask hierarchy links (task-zoom) */}
+        {renderAsteroidSubtaskLinks()}
+        {/* Dependencies (module-zoom and task-zoom) */}
+        {(viewType === 'module-zoom' || viewType === 'task-zoom') && renderDependencies()}
 
         {/* Celestial Objects */}
         <div style={{ position: 'relative', zIndex: 10 }}>

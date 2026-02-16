@@ -1,8 +1,8 @@
 // CURSOR: Type definitions for canvas objects
 
-export type ZoomLevel = 'galaxy' | 'project' | 'module';
+export type ZoomLevel = 'galaxy' | 'project' | 'module' | 'task' | 'minitask';
 
-export type ObjectType = 'project' | 'module' | 'task' | 'subtask' | 'portal';
+export type ObjectType = 'project' | 'module' | 'task' | 'subtask' | 'portal' | 'minitask';
 
 export interface Point {
   x: number;
@@ -29,6 +29,7 @@ export interface CanvasObject {
     portalTargetModuleId?: string;
     portalTargetModuleName?: string;
     portalTargetModuleColor?: string;
+    minitaskId?: string;
     [key: string]: any;
   };
 }
@@ -40,8 +41,8 @@ export interface Dependency {
   fromPos?: Point;
   toPos?: Point;
   dependencyType?: 'blocks' | 'depends_on' | 'related_to';
-  sourceType?: 'module' | 'task' | 'subtask';
-  targetType?: 'module' | 'task' | 'subtask';
+  sourceType?: 'module' | 'task' | 'subtask' | 'minitask';
+  targetType?: 'module' | 'task' | 'subtask' | 'minitask';
   isResolved?: boolean; // target entity done (for blocks)
 }
 

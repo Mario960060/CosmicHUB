@@ -11,13 +11,16 @@ import { useCanvasControls, MIN_ZOOM, MAX_ZOOM } from '../hooks/use-canvas-contr
 interface GalaxyCanvasProps {
   children: React.ReactNode;
   onBoxSelect?: (start: { x: number; y: number }, end: { x: number; y: number }) => void;
+  /** Zmiana klucza resetuje kamere (pan/zoom) do centrum */
+  resetKey?: string;
 }
 
-export function GalaxyCanvas({ children, onBoxSelect }: GalaxyCanvasProps) {
+export function GalaxyCanvas({ children, onBoxSelect, resetKey }: GalaxyCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const {
     state,
     setState,
+    reset,
     selectionBox,
     handleWheelNative,
     handleMouseDown,
@@ -25,6 +28,10 @@ export function GalaxyCanvas({ children, onBoxSelect }: GalaxyCanvasProps) {
     handleMouseUp,
     handleMouseLeave,
   } = useCanvasControls({ onBoxSelect });
+
+  useEffect(() => {
+    if (resetKey != null) reset();
+  }, [resetKey, reset]);
 
   // Use native listener with passive: false so preventDefault works (blocks page scroll)
   useEffect(() => {

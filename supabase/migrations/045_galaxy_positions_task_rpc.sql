@@ -1,0 +1,37 @@
+-- ============================================
+-- COSMIC PROJECT HUB - Galaxy Positions
+-- Migration 45: Update save_galaxy_positions RPC for task view and minitask entity type
+-- ============================================
+
+CREATE OR REPLACE FUNCTION save_galaxy_positions(
+  p_project_id uuid,
+  p_positions jsonb
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT (
+    EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'admin')
+    OR EXISTS (SELECT 1 FROM project_members WHERE project_id = p_project_id AND user_id = auth.uid() AND role = 'manager')
+  ) THEN
+    RAISE EXCEPTION 'Permission denied: only admin or project manager can save galaxy positions';
+  END IF;
+
+  DELETE FROM galaxy_positions WHERE project_id = p_project_id;
+
+  INSERT INTO galaxy_positions (project_id, entity_type, entity_id, x, y, view_context, module_id, task_id)
+  SELECT
+    p_project_id,
+    (e->>'entity_type')::text,
+    (e->>'entity_id')::uuid,
+    (e->>'x')::float,
+    (e->>'y')::float,
+    COALESCE(NULLIF(e->>'view_context', ''), 'solar_system'),
+    CASE WHEN (e->>'module_id') IS NULL OR (e->>'module_id') = '' THEN NULL ELSE (e->>'module_id')::uuid END,
+    CASE WHEN (e->>'task_id') IS NULL OR (e->>'task_id') = '' THEN NULL ELSE (e->>'task_id')::uuid END
+  FROM jsonb_array_elements(p_positions) AS e;
+END;
+$$;

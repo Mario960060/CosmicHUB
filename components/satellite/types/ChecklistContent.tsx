@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/hooks/use-auth';
+import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
+import { toast } from 'sonner';
+import { Trash2 } from 'lucide-react';
 
 interface ChecklistItem {
   id: string;
@@ -33,38 +36,51 @@ function getItems(data: Record<string, unknown>): ChecklistItem[] {
 }
 
 export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentProps) {
+  const { user } = useAuth();
+  const invalidate = useInvalidateSatelliteQueries();
   const [items, setItems] = useState<ChecklistItem[]>(() => getItems(satelliteData));
   const [newItemText, setNewItemText] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setItems(getItems(satelliteData));
-  }, [subtaskId]);
+  }, [subtaskId, satelliteData]);
 
-  const saveItems = async (newItems: ChecklistItem[]) => {
+  const saveItems = async (
+    newItems: ChecklistItem[],
+    activityEntry?: { user_id: string; action: string; detail: string }
+  ) => {
     setSaving(true);
-    const supabase = createClient();
-    await supabase
-      .from('subtasks')
-      .update({
-        satellite_data: { items: newItems },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', subtaskId);
+    const { error } = await saveSatelliteData(subtaskId, { items: newItems }, {
+      activityEntry,
+      onSuccess: () => invalidate(subtaskId),
+    });
     setSaving(false);
+    if (error) {
+      toast.error('Failed to save');
+      return;
+    }
+    setItems(newItems);
   };
 
   const updateItemStatus = (id: string, status: ChecklistItem['status']) => {
-    const next = items.map((item) => {
-      if (item.id !== id) return item;
+    const item = items.find((i) => i.id === id);
+    const next = items.map((i) => {
+      if (i.id !== id) return i;
       return {
-        ...item,
+        ...i,
         status,
         completed_at: status === 'done' ? new Date().toISOString() : null,
       };
     });
-    setItems(next);
-    saveItems(next);
+    const action = status === 'done' ? 'toggled_item' : 'toggled_item';
+    saveItems(next, user ? { user_id: user.id, action, detail: item?.text ?? '', actor_name: user.full_name } : undefined);
+  };
+
+  const deleteItem = (id: string) => {
+    const item = items.find((i) => i.id === id);
+    const next = items.filter((i) => i.id !== id).map((i, idx) => ({ ...i, order: idx }));
+    saveItems(next, user ? { user_id: user.id, action: 'deleted_item', detail: item?.text ?? '', actor_name: user.full_name } : undefined);
   };
 
   const cycleStatus = (item: ChecklistItem) => {
@@ -74,18 +90,18 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
   };
 
   const addItem = () => {
-    if (!newItemText.trim()) return;
+    if (!newItemText.trim() || !user) return;
+    const text = newItemText.trim();
     const newItem: ChecklistItem = {
       id: crypto.randomUUID(),
-      text: newItemText.trim(),
+      text,
       status: 'todo',
-      order: items.length,
+      order: 0,
       created_at: new Date().toISOString(),
     };
-    const next = [...items, newItem];
-    setItems(next);
+    const next = [newItem, ...items.map((i, idx) => ({ ...i, order: idx + 1 }))];
     setNewItemText('');
-    saveItems(next);
+    saveItems(next, { user_id: user.id, action: 'added_item', detail: text, actor_name: user.full_name });
   };
 
   const doneCount = items.filter((i) => i.status === 'done').length;
@@ -173,6 +189,21 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
             >
               {item.text}
             </span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); deleteItem(item.id); }}
+              disabled={saving}
+              style={{
+                padding: '4px',
+                background: 'none',
+                border: 'none',
+                color: 'rgba(239, 68, 68, 0.8)',
+                cursor: saving ? 'not-allowed' : 'pointer',
+              }}
+              title="Delete"
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
         ))}
       </div>

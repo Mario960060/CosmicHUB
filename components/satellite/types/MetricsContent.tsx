@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/hooks/use-auth';
+import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
+import { toast } from 'sonner';
 import {
   LineChart,
   Line,
@@ -13,7 +15,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { Star, Plus, TrendingUp, TrendingDown } from 'lucide-react';
+import { Star, Plus, TrendingUp, TrendingDown, Trash2, Pencil } from 'lucide-react';
 
 interface MetricDataPoint {
   value: number;
@@ -60,6 +62,8 @@ function formatDate(d: string) {
 }
 
 export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps) {
+  const { user } = useAuth();
+  const invalidate = useInvalidateSatelliteQueries();
   const [metrics, setMetrics] = useState<Metric[]>(() => getMetrics(satelliteData));
   const [primaryMetricId, setPrimaryMetricId] = useState<string | null>(
     (satelliteData.primary_metric_id as string) ?? null
@@ -74,29 +78,37 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
   const [addTarget, setAddTarget] = useState('');
   const [addDataPointFor, setAddDataPointFor] = useState<string | null>(null);
   const [addDataValue, setAddDataValue] = useState('');
+  const [addDataDate, setAddDataDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [editingValueFor, setEditingValueFor] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setMetrics(getMetrics(satelliteData));
     setPrimaryMetricId((satelliteData.primary_metric_id as string) ?? null);
-  }, [subtaskId]);
+  }, [subtaskId, satelliteData]);
 
-  const save = async (nextMetrics: Metric[], nextPrimary?: string | null, nextChart?: string) => {
+  const save = async (
+    nextMetrics: Metric[],
+    nextPrimary?: string | null,
+    nextChart?: string,
+    activityEntry?: { user_id: string; action: string; detail: string }
+  ) => {
     setSaving(true);
-    const supabase = createClient();
     const payload: Record<string, unknown> = {
       metrics: nextMetrics,
       primary_metric_id: nextPrimary ?? primaryMetricId,
       chart_type: nextChart ?? chartType,
     };
-    await supabase
-      .from('subtasks')
-      .update({
-        satellite_data: payload,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', subtaskId);
+    const { error } = await saveSatelliteData(subtaskId, payload, {
+      activityEntry,
+      onSuccess: () => invalidate(subtaskId),
+    });
     setSaving(false);
+    if (error) {
+      toast.error('Failed to save');
+      return;
+    }
     setMetrics(nextMetrics);
     if (nextPrimary !== undefined) setPrimaryMetricId(nextPrimary);
     if (nextChart !== undefined) setChartType(nextChart as 'line' | 'bar' | 'none');
@@ -105,17 +117,18 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
   const addMetric = () => {
     const value = parseFloat(addValue) || 0;
     const target = addTarget.trim() ? parseFloat(addTarget) : null;
+    const label = addLabel.trim() || 'New Metric';
     const m: Metric = {
       id: crypto.randomUUID(),
-      label: addLabel.trim() || 'New Metric',
+      label,
       value,
       unit: addUnit.trim(),
       target,
       type: 'number',
       history: [{ value, date: new Date().toISOString().slice(0, 10) }],
     };
-    const next = [...metrics, m];
-    save(next);
+    const next = [m, ...metrics];
+    save(next, undefined, undefined, user ? { user_id: user.id, action: 'added_metric', detail: label, actor_name: user.full_name } : undefined);
     setAddLabel('');
     setAddValue('');
     setAddUnit('');
@@ -123,21 +136,44 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
     setShowAddMetric(false);
   };
 
+  const deleteMetric = (metricId: string) => {
+    const m = metrics.find((x) => x.id === metricId);
+    const next = metrics.filter((x) => x.id !== metricId);
+    const newPrimary = primaryMetricId === metricId ? (next[0]?.id ?? null) : primaryMetricId;
+    save(next, newPrimary, undefined, user ? { user_id: user.id, action: 'deleted_metric', detail: m?.label ?? '' } : undefined);
+  };
+
   const addDataPoint = (metricId: string) => {
     const val = parseFloat(addDataValue);
     if (Number.isNaN(val)) return;
     const metric = metrics.find((m) => m.id === metricId);
     if (!metric) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const history = [...metric.history, { value: val, date: today }].sort(
+    const dateStr = addDataDate || new Date().toISOString().slice(0, 10);
+    const history = [...metric.history, { value: val, date: dateStr }].sort(
       (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
     );
     const next = metrics.map((m) =>
       m.id === metricId ? { ...m, value: val, history } : m
     );
-    save(next);
+    save(next, undefined, undefined, user ? { user_id: user.id, action: 'added_data_point', detail: `${metric.label}: ${val}`, actor_name: user.full_name } : undefined);
     setAddDataPointFor(null);
     setAddDataValue('');
+    setAddDataDate(new Date().toISOString().slice(0, 10));
+  };
+
+  const editMetricValue = (metricId: string, newValue: number) => {
+    const metric = metrics.find((m) => m.id === metricId);
+    if (!metric) return;
+    const lastPoint = metric.history[metric.history.length - 1];
+    const history = lastPoint
+      ? [...metric.history.slice(0, -1), { ...lastPoint, value: newValue }]
+      : [{ value: newValue, date: new Date().toISOString().slice(0, 10) }];
+    const next = metrics.map((m) =>
+      m.id === metricId ? { ...m, value: newValue, history } : m
+    );
+    save(next, undefined, undefined, user ? { user_id: user.id, action: 'edited_metric', detail: `${metric.label}: ${newValue}` } : undefined);
+    setEditingValueFor(null);
+    setEditValue('');
   };
 
   const primaryMetric = metrics.find((m) => m.id === primaryMetricId);
@@ -213,7 +249,7 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
           <button
             key={t}
             type="button"
-            onClick={() => save(metrics, undefined, t)}
+            onClick={() => save(metrics, undefined, t, undefined)}
             style={{
               padding: '6px 12px',
               fontSize: '12px',
@@ -264,7 +300,7 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
                   <button
                     type="button"
                     onClick={() =>
-                      save(metrics, primaryMetricId === m.id ? null : m.id)
+                      save(metrics, primaryMetricId === m.id ? null : m.id, undefined, user ? { user_id: user.id, action: 'set_primary', detail: m.label, actor_name: user.full_name } : undefined)
                     }
                     style={{
                       background: 'none',
@@ -277,38 +313,127 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
                   >
                     <Star size={16} fill={primaryMetricId === m.id ? '#fbbf24' : 'none'} />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteMetric(m.id)}
+                    disabled={saving}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      cursor: saving ? 'not-allowed' : 'pointer',
+                      color: 'rgba(239, 68, 68, 0.8)',
+                    }}
+                    title="Delete metric"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '18px', fontWeight: 700, color: '#fbbf24' }}>
-                    {m.value}
-                    {m.unit}
-                  </span>
-                  {m.target != null && (
-                    <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
-                      / {m.target}{m.unit}
-                      {pctTarget != null && ` (${pctTarget}%)`}
-                    </span>
+                  {editingValueFor === m.id ? (
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && (() => { const v = parseFloat(editValue); if (!Number.isNaN(v)) editMetricValue(m.id, v); })()}
+                        autoFocus
+                        style={{
+                          width: '80px',
+                          padding: '4px 8px',
+                          background: 'rgba(0,0,0,0.3)',
+                          border: '1px solid rgba(251,191,36,0.5)',
+                          borderRadius: '6px',
+                          color: '#fbbf24',
+                          fontSize: '14px',
+                          outline: 'none',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => { const v = parseFloat(editValue); if (!Number.isNaN(v)) editMetricValue(m.id, v); }}
+                        disabled={saving || editValue === ''}
+                        style={{
+                          padding: '4px 8px',
+                          background: 'rgba(251, 191, 36, 0.2)',
+                          border: '1px solid rgba(251, 191, 36, 0.4)',
+                          borderRadius: '6px',
+                          color: '#fbbf24',
+                          fontSize: '12px',
+                          cursor: saving || editValue === '' ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setEditingValueFor(null); setEditValue(''); }}
+                        style={{
+                          padding: '4px 8px',
+                          background: 'rgba(255,255,255,0.1)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: '18px', fontWeight: 700, color: '#fbbf24' }}>
+                        {m.value}
+                        {m.unit}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { setEditingValueFor(m.id); setEditValue(String(m.value)); }}
+                        disabled={saving}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: 0,
+                          cursor: saving ? 'not-allowed' : 'pointer',
+                          color: 'rgba(255,255,255,0.5)',
+                        }}
+                        title="Edit value"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </>
                   )}
-                  {localTrend != null && (
-                    <span
-                      style={{
-                        fontSize: '12px',
-                        color: localTrend >= 0 ? '#22c55e' : '#ef4444',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '2px',
-                      }}
-                    >
-                      {localTrend >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                      {localTrend >= 0 ? '+' : ''}
-                      {localTrend}
-                    </span>
+                  {editingValueFor !== m.id && (
+                    <>
+                      {m.target != null && (
+                        <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
+                          / {m.target}{m.unit}
+                          {pctTarget != null && ` (${pctTarget}%)`}
+                        </span>
+                      )}
+                      {localTrend != null && (
+                        <span
+                          style={{
+                            fontSize: '12px',
+                            color: localTrend >= 0 ? '#22c55e' : '#ef4444',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '2px',
+                          }}
+                        >
+                          {localTrend >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                          {localTrend >= 0 ? '+' : ''}
+                          {localTrend}
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
 
               {addDataPointFor === m.id ? (
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
                   <input
                     type="number"
                     value={addDataValue}
@@ -316,6 +441,20 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
                     placeholder="New value"
                     style={{
                       flex: 1,
+                      padding: '8px 10px',
+                      background: 'rgba(0,0,0,0.3)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: '6px',
+                      color: '#fff',
+                      fontSize: '13px',
+                      outline: 'none',
+                    }}
+                  />
+                  <input
+                    type="date"
+                    value={addDataDate}
+                    onChange={(e) => setAddDataDate(e.target.value)}
+                    style={{
                       padding: '8px 10px',
                       background: 'rgba(0,0,0,0.3)',
                       border: '1px solid rgba(255,255,255,0.2)',

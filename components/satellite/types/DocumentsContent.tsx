@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
-import { createClient } from '@/lib/supabase/client';
+import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
+import { ensureAbsoluteUrl } from '@/lib/utils';
+import { toast } from 'sonner';
 import { FileText, Link as LinkIcon, Plus, FolderOpen } from 'lucide-react';
 
 interface DocLink {
@@ -43,6 +45,7 @@ function getLinkType(url: string): string {
 
 export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentProps) {
   const { user } = useAuth();
+  const invalidate = useInvalidateSatelliteQueries();
   const [tab, setTab] = useState<'files' | 'links'>('links');
   const [links, setLinks] = useState<DocLink[]>(() => getLinks(satelliteData));
   const [newUrl, setNewUrl] = useState('');
@@ -52,7 +55,7 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
 
   useEffect(() => {
     setLinks(getLinks(satelliteData));
-  }, [subtaskId]);
+  }, [subtaskId, satelliteData]);
 
   const getExistingData = () => {
     const files = Array.isArray(satelliteData.files) ? satelliteData.files : [];
@@ -60,18 +63,22 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
     return { files, folders };
   };
 
-  const save = async (nextLinks: DocLink[]) => {
+  const save = async (
+    nextLinks: DocLink[],
+    activityEntry?: { user_id: string; action: string; detail: string }
+  ) => {
     setSaving(true);
-    const supabase = createClient();
     const { files, folders } = getExistingData();
-    await supabase
-      .from('subtasks')
-      .update({
-        satellite_data: { files, links: nextLinks, folders },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', subtaskId);
+    const { error } = await saveSatelliteData(
+      subtaskId,
+      { files, links: nextLinks, folders },
+      { activityEntry, onSuccess: () => invalidate(subtaskId) }
+    );
     setSaving(false);
+    if (error) {
+      toast.error('Failed to save');
+      return;
+    }
     setLinks(nextLinks);
   };
 
@@ -85,16 +92,17 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
       added_by: user.id,
       added_at: new Date().toISOString(),
     };
-    const next = [...links, link];
-    save(next);
+    const next = [link, ...links];
+    save(next, { user_id: user.id, action: 'added_link', detail: link.label || link.url, actor_name: user.full_name });
     setNewUrl('');
     setNewLabel('');
     setShowAddLink(false);
   };
 
   const removeLink = (id: string) => {
+    const link = links.find((l) => l.id === id);
     const next = links.filter((l) => l.id !== id);
-    save(next);
+    save(next, { user_id: user!.id, action: 'removed_link', detail: link?.label || link?.url || '', actor_name: user!.full_name });
   };
 
   const typeIcon = (t?: string) => {
@@ -169,9 +177,9 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
           }}
         >
           <FileText size={40} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-          <p style={{ margin: 0, fontSize: '14px' }}>File upload coming soon</p>
+          <p style={{ margin: 0, fontSize: '14px' }}>File upload with Supabase Storage — coming in next phase.</p>
           <p style={{ margin: '8px 0 0', fontSize: '12px' }}>
-            Drag & drop and Supabase Storage integration in next phase
+            Use Links tab for now.
           </p>
         </div>
       )}
@@ -297,7 +305,7 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
               >
                 <span style={{ fontSize: '20px' }}>{typeIcon(link.type)}</span>
                 <a
-                  href={link.url}
+                  href={ensureAbsoluteUrl(link.url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{

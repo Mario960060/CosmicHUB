@@ -192,7 +192,7 @@ export function useCreateTask() {
       moduleId: string;
       name: string;
       description?: string;
-      estimatedHours?: number;
+      estimatedHours?: number | null;
       priorityStars?: number;
       createdBy: string;
       spacecraftType?: string;
@@ -205,7 +205,7 @@ export function useCreateTask() {
           module_id: moduleId,
           name,
           description,
-          estimated_hours: estimatedHours,
+          estimated_hours: estimatedHours ?? null,
           priority_stars: priorityStars || 1.0,
           created_by: createdBy,
           spacecraft_type: spacecraftType || 'sphere-drone',
@@ -293,11 +293,12 @@ export function useUpdateTask() {
       updates: {
         name?: string;
         description?: string;
-        estimated_hours?: number;
+        estimated_hours?: number | null;
         priority_stars?: number;
         spacecraft_type?: string;
         due_date?: string | null;
         status?: TaskStatus;
+        module_id?: string;
       };
     }) => {
       const supabase = createClient();
@@ -336,6 +337,125 @@ export function useDeleteTask() {
   });
 }
 
+// Create minitask (asteroid)
+export function useCreateMinitask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      taskId,
+      moduleId,
+      projectId,
+      name,
+      description,
+      estimatedHours,
+      priorityStars,
+      asteroidType,
+      assignedTo,
+      dueDate,
+      createdBy,
+    }: {
+      taskId?: string;
+      moduleId?: string;
+      projectId?: string;
+      name: string;
+      description?: string;
+      estimatedHours?: number;
+      priorityStars?: number;
+      asteroidType?: string;
+      assignedTo?: string;
+      dueDate?: string;
+      createdBy?: string;
+    }) => {
+      const count = [taskId, moduleId, projectId].filter(Boolean).length;
+      if (count !== 1) throw new Error('Provide exactly one of taskId, moduleId, or projectId');
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from('minitasks')
+        .insert({
+          ...(taskId ? { task_id: taskId } : moduleId ? { module_id: moduleId } : { project_id: projectId }),
+          name,
+          description: description || null,
+          estimated_hours: estimatedHours,
+          priority_stars: priorityStars ?? 1.0,
+          asteroid_type: asteroidType || 'rocky',
+          assigned_to: assignedTo || null,
+          due_date: dueDate || null,
+          created_by: createdBy || null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['modules'] });
+      queryClient.invalidateQueries({ queryKey: ['galactic-data'] });
+    },
+  });
+}
+
+// Update minitask
+export function useUpdateMinitask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      minitaskId,
+      updates,
+    }: {
+      minitaskId: string;
+      updates: {
+        name?: string;
+        description?: string;
+        estimated_hours?: number | null;
+        priority_stars?: number;
+        asteroid_type?: string;
+        assigned_to?: string | null;
+        due_date?: string | null;
+        status?: TaskStatus;
+        task_id?: string | null;
+        module_id?: string | null;
+        project_id?: string | null;
+      };
+    }) => {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('minitasks')
+        .update(updates)
+        .eq('id', minitaskId);
+
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['modules'] });
+      queryClient.invalidateQueries({ queryKey: ['galactic-data'] });
+      queryClient.invalidateQueries({ queryKey: ['asteroid-details', variables.minitaskId] });
+    },
+  });
+}
+
+// Delete minitask
+export function useDeleteMinitask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ minitaskId }: { minitaskId: string }) => {
+      const supabase = createClient();
+      const { error } = await supabase.from('minitasks').delete().eq('id', minitaskId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['modules'] });
+      queryClient.invalidateQueries({ queryKey: ['galactic-data'] });
+    },
+  });
+}
+
 // Satellite types matching SATELLITE_SYSTEM_SPEC
 export type SatelliteType =
   | 'notes'
@@ -345,15 +465,19 @@ export type SatelliteType =
   | 'metrics'
   | 'documents'
   | 'ideas'
-  | 'repo';
+  | 'repo'
+  | 'canvas';
 
-// Create subtask
+// Create subtask (polymorphic parent: exactly one of parentId, moduleId, projectId, minitaskId)
 export function useCreateSubtask() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({
       parentId,
+      moduleId,
+      projectId,
+      minitaskId,
       name,
       description,
       estimatedHours,
@@ -364,7 +488,10 @@ export function useCreateSubtask() {
       satelliteType,
       satelliteData,
     }: {
-      parentId: string;
+      parentId?: string;
+      moduleId?: string;
+      projectId?: string;
+      minitaskId?: string;
       name: string;
       description?: string;
       estimatedHours?: number;
@@ -376,20 +503,26 @@ export function useCreateSubtask() {
       satelliteData?: Record<string, unknown>;
     }) => {
       const supabase = createClient();
+      const insertRow: Record<string, unknown> = {
+        name,
+        description: description || null,
+        estimated_hours: estimatedHours,
+        priority_stars: priorityStars || 1.0,
+        assigned_to: assignedTo || null,
+        due_date: dueDate || null,
+        created_by: createdBy,
+        satellite_type: satelliteType || 'notes',
+        satellite_data: satelliteData ?? {},
+      };
+      if (parentId) insertRow.parent_id = parentId;
+      else if (moduleId) insertRow.module_id = moduleId;
+      else if (projectId) insertRow.project_id = projectId;
+      else if (minitaskId) insertRow.minitask_id = minitaskId;
+      else throw new Error('Subtask requires exactly one parent: parentId, moduleId, projectId, or minitaskId');
+
       const { data, error } = await supabase
         .from('subtasks')
-        .insert({
-          parent_id: parentId,
-          name,
-          description,
-          estimated_hours: estimatedHours,
-          priority_stars: priorityStars || 1.0,
-          assigned_to: assignedTo,
-          due_date: dueDate,
-          created_by: createdBy,
-          satellite_type: satelliteType || 'notes',
-          satellite_data: satelliteData ?? {},
-        })
+        .insert(insertRow)
         .select()
         .single();
 
@@ -420,6 +553,7 @@ export function useUpdateSubtask() {
         description?: string;
         estimated_hours?: number;
         priority_stars?: number;
+        assigned_to?: string | null;
         satellite_type?: SatelliteType;
       };
     }) => {
@@ -431,7 +565,8 @@ export function useUpdateSubtask() {
 
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_, { subtaskId }) => {
+      queryClient.invalidateQueries({ queryKey: ['subtask', subtaskId] });
       queryClient.invalidateQueries({ queryKey: ['subtasks'] });
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
       queryClient.invalidateQueries({ queryKey: ['galactic-data'] });
@@ -762,9 +897,9 @@ export function useCreateDependency() {
       dependencyType = 'depends_on',
       note,
     }: {
-      sourceType: 'module' | 'task' | 'subtask';
+      sourceType: 'module' | 'task' | 'subtask' | 'minitask';
       sourceId: string;
-      targetType: 'module' | 'task' | 'subtask';
+      targetType: 'module' | 'task' | 'subtask' | 'minitask';
       targetId: string;
       dependencyType?: 'blocks' | 'depends_on' | 'related_to';
       note?: string | null;

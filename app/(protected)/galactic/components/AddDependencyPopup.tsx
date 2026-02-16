@@ -6,9 +6,9 @@ import type { DependencyType } from '@/lib/pm/queries';
 
 interface AddDependencyPopupProps {
   sourceEntityId: string;
-  sourceEntityType: 'module' | 'task' | 'subtask';
+  sourceEntityType: 'module' | 'task' | 'subtask' | 'minitask';
   targetEntityId: string;
-  targetEntityType: 'module' | 'task' | 'subtask';
+  targetEntityType: 'module' | 'task' | 'subtask' | 'minitask';
   targetEntityName: string;
   onClose: () => void;
   onSuccess: () => void;

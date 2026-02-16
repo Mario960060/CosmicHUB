@@ -4,8 +4,10 @@
 
 import { useState, useEffect } from 'react';
 import { useCreateModule } from '@/lib/pm/mutations';
+import { DatePicker } from '@/components/ui/DatePicker';
 import { X } from 'lucide-react';
 import { z } from 'zod';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const moduleSchema = z.object({
   name: z.string().min(2).max(100),
@@ -51,12 +53,14 @@ interface CreateModuleDialogProps {
 }
 
 export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType, onSuccess }: CreateModuleDialogProps) {
+  const { confirm, ConfirmDialog: ConfirmDialogEl } = useConfirm();
   const createModule = useCreateModule();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [priorityStars, setPriorityStars] = useState('1.0');
   const [estimatedHours, setEstimatedHours] = useState('');
+  const [estimatedHoursFromTasks, setEstimatedHoursFromTasks] = useState(true);
   const [status, setStatus] = useState<'todo' | 'in_progress' | 'done'>('todo');
   const [planetType, setPlanetType] = useState<'ocean' | 'indigo' | 'rose' | 'amber'>(initialPlanetType ?? 'ocean');
   const [color, setColor] = useState(PLANET_TYPES[0].color); // Keep for backwards compat
@@ -65,6 +69,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
   const [focusedInput, setFocusedInput] = useState<string | null>(null);
   const [hoveredClose, setHoveredClose] = useState(false);
   const [hoveredPlanet, setHoveredPlanet] = useState<string | null>(null);
+  const [hoveredStatus, setHoveredStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (open && initialPlanetType) {
@@ -73,6 +78,22 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
       if (planet) setColor(planet.color);
     }
   }, [open, initialPlanetType]);
+
+  const hasUnsavedChanges = name.trim() || description.trim() || dueDate || (!estimatedHoursFromTasks && estimatedHours);
+
+  const handleClose = async () => {
+    if (hasUnsavedChanges) {
+      const confirmed = await confirm({
+        title: 'Niezapisane zmiany',
+        message: 'Czy na pewno chcesz wyjść? Niezapisane zmiany zostaną utracone.',
+        confirmLabel: 'Wyjdź',
+        cancelLabel: 'Zostań',
+        variant: 'warning',
+      });
+      if (!confirmed) return;
+    }
+    onClose();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,7 +104,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
         description: description || undefined,
         color,
         priorityStars: parseFloat(priorityStars),
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+        estimatedHours: !estimatedHoursFromTasks && estimatedHours ? parseFloat(estimatedHours) : undefined,
       });
 
       const data = await createModule.mutateAsync({
@@ -94,7 +115,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
         planetType,
         dueDate: dueDate || undefined,
         priorityStars: parseFloat(priorityStars),
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+        estimatedHours: estimatedHoursFromTasks ? undefined : (estimatedHours ? parseFloat(estimatedHours) : undefined),
         status,
       });
 
@@ -108,6 +129,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
       setStatus('todo');
       setPlanetType('ocean');
       setColor(PLANET_TYPES[0].color);
+      setEstimatedHoursFromTasks(true);
       setErrors({});
       onClose();
     } catch (err) {
@@ -129,7 +151,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
     <>
       {/* Backdrop */}
       <div 
-        onClick={onClose}
+        onClick={handleClose}
         style={{
           position: 'fixed',
           inset: 0,
@@ -149,6 +171,9 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
             position: 'relative',
             width: '100%',
             maxWidth: '600px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
             background: 'rgba(21, 27, 46, 0.95)',
             backdropFilter: 'blur(30px)',
             border: '1px solid rgba(0, 217, 255, 0.3)',
@@ -195,7 +220,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
               <span>🪐</span> Create Module
             </h2>
             <button
-              onClick={onClose}
+              onClick={handleClose}
               onMouseEnter={() => setHoveredClose(true)}
               onMouseLeave={() => setHoveredClose(false)}
               style={{
@@ -217,7 +242,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
           </div>
 
           {/* Body */}
-          <form onSubmit={handleSubmit} style={{ padding: '32px' }}>
+          <form onSubmit={handleSubmit} className="scrollbar-cosmic" style={{ padding: '32px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0 }}>
             {/* Module Name */}
             <div style={{ marginBottom: '24px' }}>
               <label style={{
@@ -309,22 +334,11 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
               }}>
                 Due Date
               </label>
-              <input
-                type="date"
+              <DatePicker
                 value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  border: '1px solid rgba(0, 217, 255, 0.3)',
-                  borderRadius: '12px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  outline: 'none',
-                  colorScheme: 'dark',
-                  fontFamily: 'inherit',
-                }}
+                onChange={setDueDate}
+                placeholder="Select date"
+                usePortal
               />
             </div>
 
@@ -375,26 +389,55 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
               }}>
                 Estimated Hours
               </label>
-              <input
-                type="number"
-                min="0"
-                step="0.5"
-                value={estimatedHours}
-                onChange={(e) => setEstimatedHours(e.target.value)}
-                placeholder="e.g. 40"
+              <label
                 style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  border: errors.estimatedHours ? '1px solid #ef4444' : '1px solid rgba(0, 217, 255, 0.3)',
-                  borderRadius: '12px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  outline: 'none',
-                  fontFamily: 'inherit',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '12px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  color: 'rgba(255, 255, 255, 0.85)',
                 }}
-              />
-              {errors.estimatedHours && (
+              >
+                <input
+                  type="checkbox"
+                  checked={estimatedHoursFromTasks}
+                  onChange={(e) => {
+                    setEstimatedHoursFromTasks(e.target.checked);
+                    if (e.target.checked) setEstimatedHours('');
+                  }}
+                  style={{
+                    width: '18px',
+                    height: '18px',
+                    accentColor: '#00d9ff',
+                    cursor: 'pointer',
+                  }}
+                />
+                <span>Oblicz na podstawie szacowanych godzin zadań (suma księżyców)</span>
+              </label>
+              {!estimatedHoursFromTasks && (
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={estimatedHours}
+                  onChange={(e) => setEstimatedHours(e.target.value)}
+                  placeholder="e.g. 40"
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    background: 'rgba(0, 0, 0, 0.3)',
+                    border: errors.estimatedHours ? '1px solid #ef4444' : '1px solid rgba(0, 217, 255, 0.3)',
+                    borderRadius: '12px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    outline: 'none',
+                    fontFamily: 'inherit',
+                  }}
+                />
+              )}
+              {!estimatedHoursFromTasks && errors.estimatedHours && (
                 <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>{errors.estimatedHours}</p>
               )}
             </div>
@@ -406,30 +449,50 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
                 fontSize: '14px',
                 fontWeight: '600',
                 color: '#00d9ff',
-                marginBottom: '8px',
+                marginBottom: '12px',
               }}>
                 Status
               </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as 'todo' | 'in_progress' | 'done')}
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  border: '1px solid rgba(0, 217, 255, 0.3)',
-                  borderRadius: '12px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                }}
-              >
-                <option value="todo">To Do</option>
-                <option value="in_progress">In Progress</option>
-                <option value="done">Done</option>
-              </select>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                {(['todo', 'in_progress', 'done'] as const).map((s) => {
+                  const isSelected = status === s;
+                  const isHovered = hoveredStatus === s;
+                  const colors = { todo: '#94a3b8', in_progress: '#f59e0b', done: '#22c55e' };
+                  const labels = { todo: 'To Do', in_progress: 'In Progress', done: 'Done' };
+                  const c = colors[s];
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatus(s)}
+                      onMouseEnter={() => setHoveredStatus(s)}
+                      onMouseLeave={() => setHoveredStatus(null)}
+                      style={{
+                        flex: 1,
+                        minWidth: '100px',
+                        padding: '12px 16px',
+                        background: isSelected ? `${c}22` : isHovered ? `${c}11` : 'rgba(0, 0, 0, 0.3)',
+                        border: isSelected ? `2px solid ${c}` : isHovered ? `1px solid ${c}88` : '1px solid rgba(0, 217, 255, 0.2)',
+                        borderRadius: '12px',
+                        color: isSelected || isHovered ? c : 'rgba(255, 255, 255, 0.8)',
+                        fontSize: '13px',
+                        fontWeight: isSelected ? 600 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        fontFamily: 'inherit',
+                        boxShadow: isSelected ? `0 0 12px ${c}40` : 'none',
+                      }}
+                    >
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: c, flexShrink: 0 }} />
+                      {labels[s]}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Planet Type Picker */}
@@ -593,6 +656,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
           color: rgba(255, 255, 255, 0.3);
         }
       `}</style>
+      {ConfirmDialogEl}
     </>
   );
 }

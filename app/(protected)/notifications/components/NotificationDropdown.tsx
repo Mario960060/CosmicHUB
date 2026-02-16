@@ -55,6 +55,13 @@ export function NotificationDropdown({ onClose }: NotificationDropdownProps) {
     onClose();
   };
 
+  const handleMarkAsReadOnly = async (e: React.MouseEvent, notification: any) => {
+    e.stopPropagation();
+    if (!notification.read) {
+      await markAsRead.mutateAsync(notification.id);
+    }
+  };
+
   // Show only unread notifications in dropdown
   const recentNotifications = notifications?.filter(n => !n.read).slice(0, 10) || [];
 
@@ -101,7 +108,7 @@ export function NotificationDropdown({ onClose }: NotificationDropdownProps) {
       </div>
 
       {/* List */}
-      <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+      <div className="scrollbar-cosmic" style={{ maxHeight: '400px', overflowY: 'auto' }}>
         {recentNotifications.length === 0 ? (
           <div style={{ padding: '48px 32px', textAlign: 'center' }}>
             <div style={{
@@ -189,13 +196,25 @@ export function NotificationDropdown({ onClose }: NotificationDropdownProps) {
                   </p>
                 </div>
                 {!notification.read && (
-                  <div style={{
-                    width: '10px',
-                    height: '10px',
-                    borderRadius: '50%',
-                    background: '#ff6b35',
-                    marginTop: '4px'
-                  }} />
+                  <button
+                    type="button"
+                    onClick={(e) => handleMarkAsReadOnly(e, notification)}
+                    title="Mark as read"
+                    style={{
+                      width: '14px',
+                      height: '14px',
+                      minWidth: '14px',
+                      minHeight: '14px',
+                      padding: 0,
+                      borderRadius: '50%',
+                      background: '#ff6b35',
+                      border: 'none',
+                      marginTop: '4px',
+                      cursor: 'pointer',
+                      boxShadow: '0 0 8px rgba(255, 107, 53, 0.5)',
+                      flexShrink: 0,
+                    }}
+                  />
                 )}
               </div>
             </div>

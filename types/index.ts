@@ -5,6 +5,7 @@ export type User = Database['public']['Tables']['users']['Row'];
 export type Project = Database['public']['Tables']['projects']['Row'];
 export type Module = Database['public']['Tables']['modules']['Row'];
 export type Task = Database['public']['Tables']['tasks']['Row'];
+export type Minitask = Database['public']['Tables']['minitasks']['Row'];
 export type Subtask = Database['public']['Tables']['subtasks']['Row'];
 export type Dependency = Database['public']['Tables']['dependencies']['Row'];
 export type WorkLog = Database['public']['Tables']['work_logs']['Row'];

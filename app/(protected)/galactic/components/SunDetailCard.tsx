@@ -33,7 +33,8 @@ import {
 interface SunDetailCardProps {
   projectId: string;
   onClose: () => void;
-  onZoomIn?: () => void;
+  /** Zoom to module view (pass moduleId to zoom to) */
+  onZoomIn?: (moduleId: string) => void;
 }
 
 interface ProjectWithModules {
@@ -359,6 +360,7 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
 
         {/* Scrollable body */}
         <div
+          className="scrollbar-cosmic"
           style={{
             flex: 1,
             overflowY: 'auto',
@@ -432,7 +434,7 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
                   (acc, st) => acc + sumLoggedHours((st as { work_logs?: { hours_spent: number }[] }).work_logs || []),
                   0
                 );
-                const modEstimatedHours = sumEstimatedHours(mod.tasks || []);
+                const modEstimatedHours = (mod as { estimated_hours?: number | null }).estimated_hours ?? sumEstimatedHours(mod.tasks || []);
                 const modAssignedCount = getAssignedPeople(allModSubtasks as { assigned_to: string | null }[]).length;
                 const modStars = mod.priority_stars ?? 1;
                 return (
@@ -639,7 +641,7 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
           </CollapsibleSection>
         </div>
 
-        {/* Sticky footer */}
+        {/* Sticky footer: Zoom In, Assign Team — w jednej linii */}
         {(onZoomIn || canAssignTeam) && (
           <div
             style={{
@@ -652,36 +654,18 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
               borderTop: `1px solid ${cardTheme.border.replace('0.4', '0.2')}`,
               display: 'flex',
               gap: 12,
-              flexWrap: 'wrap',
+              flexWrap: 'nowrap',
+              alignItems: 'center',
+              overflowX: 'auto',
             }}
           >
-            {canAssignTeam && (
+            {onZoomIn && modules.length > 0 && (
               <button
-                onClick={(e) => { e.stopPropagation(); setShowAssignTeam(true); }}
+                onClick={() => { onClose(); onZoomIn(modules[0].id); }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
-                  padding: '12px 20px',
-                  background: 'rgba(0, 217, 255, 0.15)',
-                  border: '1px solid rgba(0, 217, 255, 0.4)',
-                  borderRadius: 10,
-                  color: '#00d9ff',
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                <UserPlus size={18} />
-                Assign Team
-              </button>
-            )}
-            {onZoomIn && (
-              <button
-                onClick={() => { onClose(); onZoomIn(); }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
+                  flexShrink: 0,
                   gap: 8,
                   padding: '12px 20px',
                   background: `linear-gradient(135deg, ${cardTheme.accent}, rgba(251, 184, 0, 0.2))`,
@@ -696,6 +680,28 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
               >
                 <Telescope size={18} />
                 Zoom In
+              </button>
+            )}
+            {canAssignTeam && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowAssignTeam(true); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                  gap: 8,
+                  padding: '12px 20px',
+                  background: 'rgba(0, 217, 255, 0.15)',
+                  border: '1px solid rgba(0, 217, 255, 0.4)',
+                  borderRadius: 10,
+                  color: '#00d9ff',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                <UserPlus size={18} />
+                Assign Team
               </button>
             )}
           </div>

@@ -37,10 +37,12 @@ export function EditModuleDialog({
   const [dueDate, setDueDate] = useState('');
   const [priorityStars, setPriorityStars] = useState('1.0');
   const [estimatedHours, setEstimatedHours] = useState('');
+  const [estimatedHoursFromTasks, setEstimatedHoursFromTasks] = useState(true);
   const [status, setStatus] = useState<'todo' | 'in_progress' | 'done'>('todo');
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
+  const [hoveredStatus, setHoveredStatus] = useState<string | null>(null);
   const [focusedInput, setFocusedInput] = useState<string | null>(null);
   useEffect(() => {
     if (open && moduleId) {
@@ -57,14 +59,18 @@ export function EditModuleDialog({
             setDescription(data.description || '');
             setDueDate(data.due_date ? data.due_date.split('T')[0] : '');
             setPriorityStars(String((data as any).priority_stars ?? 1));
-            setEstimatedHours((data as any).estimated_hours?.toString() ?? '');
+            const eh = (data as any).estimated_hours;
+            setEstimatedHours(eh != null ? String(eh) : '');
+            setEstimatedHoursFromTasks(eh == null);
             setStatus(((data as any).status as 'todo' | 'in_progress' | 'done') || 'todo');
           } else if (initialData) {
             setName(initialData.name);
             setDescription(initialData.description || '');
             setDueDate(initialData.dueDate ? initialData.dueDate.split('T')[0] : '');
             setPriorityStars(initialData.priorityStars?.toString() ?? '1.0');
-            setEstimatedHours(initialData.estimatedHours?.toString() ?? '');
+            const eh = initialData.estimatedHours;
+            setEstimatedHours(eh != null ? String(eh) : '');
+            setEstimatedHoursFromTasks(eh == null);
             setStatus((initialData.status as 'todo' | 'in_progress' | 'done') || 'todo');
           }
           setLoading(false);
@@ -79,7 +85,7 @@ export function EditModuleDialog({
         name,
         description: description || undefined,
         priorityStars: parseFloat(priorityStars),
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+        estimatedHours: !estimatedHoursFromTasks && estimatedHours ? parseFloat(estimatedHours) : undefined,
       });
       await updateModule.mutateAsync({
         moduleId,
@@ -88,7 +94,7 @@ export function EditModuleDialog({
           description: description || undefined,
           due_date: dueDate || null,
           priority_stars: parseFloat(priorityStars),
-          estimated_hours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+          estimated_hours: estimatedHoursFromTasks ? null : (estimatedHours ? parseFloat(estimatedHours) : undefined),
           status,
         },
       });
@@ -250,22 +256,49 @@ export function EditModuleDialog({
             </div>
 
             <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#00d9ff', marginBottom: '8px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#00d9ff', marginBottom: '12px' }}>
                 Status
               </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as 'todo' | 'in_progress' | 'done')}
-                style={{
-                  ...inputBase,
-                  border: '1px solid rgba(0, 217, 255, 0.3)',
-                  cursor: 'pointer',
-                }}
-              >
-                <option value="todo">To Do</option>
-                <option value="in_progress">In Progress</option>
-                <option value="done">Done</option>
-              </select>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                {(['todo', 'in_progress', 'done'] as const).map((s) => {
+                  const isSelected = status === s;
+                  const isHovered = hoveredStatus === s;
+                  const colors = { todo: '#94a3b8', in_progress: '#f59e0b', done: '#22c55e' };
+                  const labels = { todo: 'To Do', in_progress: 'In Progress', done: 'Done' };
+                  const c = colors[s];
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatus(s)}
+                      onMouseEnter={() => setHoveredStatus(s)}
+                      onMouseLeave={() => setHoveredStatus(null)}
+                      style={{
+                        flex: 1,
+                        minWidth: '100px',
+                        padding: '12px 16px',
+                        background: isSelected ? `${c}22` : isHovered ? `${c}11` : 'rgba(0, 0, 0, 0.3)',
+                        border: isSelected ? `2px solid ${c}` : isHovered ? `1px solid ${c}88` : '1px solid rgba(0, 217, 255, 0.2)',
+                        borderRadius: '12px',
+                        color: isSelected || isHovered ? c : 'rgba(255, 255, 255, 0.8)',
+                        fontSize: '13px',
+                        fontWeight: isSelected ? 600 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        fontFamily: 'inherit',
+                        boxShadow: isSelected ? `0 0 12px ${c}40` : 'none',
+                      }}
+                    >
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: c, flexShrink: 0 }} />
+                      {labels[s]}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div style={{ marginBottom: '24px' }}>
@@ -292,19 +325,48 @@ export function EditModuleDialog({
               <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#00d9ff', marginBottom: '8px' }}>
                 Estimated Hours
               </label>
-              <input
-                type="number"
-                min="0"
-                step="0.5"
-                value={estimatedHours}
-                onChange={(e) => setEstimatedHours(e.target.value)}
-                placeholder="e.g. 40"
+              <label
                 style={{
-                  ...inputBase,
-                  border: errors.estimatedHours ? '1px solid #ef4444' : '1px solid rgba(0, 217, 255, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '12px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  color: 'rgba(255, 255, 255, 0.85)',
                 }}
-              />
-              {errors.estimatedHours && <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>{errors.estimatedHours}</p>}
+              >
+                <input
+                  type="checkbox"
+                  checked={estimatedHoursFromTasks}
+                  onChange={(e) => {
+                    setEstimatedHoursFromTasks(e.target.checked);
+                    if (e.target.checked) setEstimatedHours('');
+                  }}
+                  style={{
+                    width: '18px',
+                    height: '18px',
+                    accentColor: '#00d9ff',
+                    cursor: 'pointer',
+                  }}
+                />
+                <span>Oblicz na podstawie szacowanych godzin zadań (suma księżyców)</span>
+              </label>
+              {!estimatedHoursFromTasks && (
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={estimatedHours}
+                  onChange={(e) => setEstimatedHours(e.target.value)}
+                  placeholder="e.g. 40"
+                  style={{
+                    ...inputBase,
+                    border: errors.estimatedHours ? '1px solid #ef4444' : '1px solid rgba(0, 217, 255, 0.3)',
+                  }}
+                />
+              )}
+              {!estimatedHoursFromTasks && errors.estimatedHours && <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>{errors.estimatedHours}</p>}
             </div>
 
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', paddingTop: '8px', borderTop: '1px solid rgba(0, 217, 255, 0.1)' }}>

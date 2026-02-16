@@ -41,6 +41,7 @@ export function EditTaskDialog({
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
+  const [hoveredStatus, setHoveredStatus] = useState<string | null>(null);
   const [focusedInput, setFocusedInput] = useState<string | null>(null);
   useEffect(() => {
     if (open && taskId) {
@@ -86,7 +87,7 @@ export function EditTaskDialog({
         updates: {
           name,
           description: description || undefined,
-          estimated_hours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+          estimated_hours: estimatedHours ? parseFloat(estimatedHours) : null,
           priority_stars: parseFloat(priorityStars),
           due_date: dueDate || null,
           status,
@@ -239,22 +240,49 @@ export function EditTaskDialog({
             </div>
 
             <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#00d9ff', marginBottom: '8px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#00d9ff', marginBottom: '12px' }}>
                 Status
               </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as 'todo' | 'in_progress' | 'done')}
-                style={{
-                  ...inputBase,
-                  border: '1px solid rgba(0, 217, 255, 0.3)',
-                  cursor: 'pointer',
-                }}
-              >
-                <option value="todo">To Do</option>
-                <option value="in_progress">In Progress</option>
-                <option value="done">Done</option>
-              </select>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                {(['todo', 'in_progress', 'done'] as const).map((s) => {
+                  const isSelected = status === s;
+                  const isHovered = hoveredStatus === s;
+                  const colors = { todo: '#94a3b8', in_progress: '#f59e0b', done: '#22c55e' };
+                  const labels = { todo: 'To Do', in_progress: 'In Progress', done: 'Done' };
+                  const c = colors[s];
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatus(s)}
+                      onMouseEnter={() => setHoveredStatus(s)}
+                      onMouseLeave={() => setHoveredStatus(null)}
+                      style={{
+                        flex: 1,
+                        minWidth: '100px',
+                        padding: '12px 16px',
+                        background: isSelected ? `${c}22` : isHovered ? `${c}11` : 'rgba(0, 0, 0, 0.3)',
+                        border: isSelected ? `2px solid ${c}` : isHovered ? `1px solid ${c}88` : '1px solid rgba(0, 217, 255, 0.2)',
+                        borderRadius: '12px',
+                        color: isSelected || isHovered ? c : 'rgba(255, 255, 255, 0.8)',
+                        fontSize: '13px',
+                        fontWeight: isSelected ? 600 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        fontFamily: 'inherit',
+                        boxShadow: isSelected ? `0 0 12px ${c}40` : 'none',
+                      }}
+                    >
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: c, flexShrink: 0 }} />
+                      {labels[s]}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div style={{ marginBottom: '24px' }}>

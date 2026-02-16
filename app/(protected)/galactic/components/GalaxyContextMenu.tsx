@@ -10,21 +10,25 @@ export type ContextMenuAction =
   | 'edit-module'
   | 'edit-task'
   | 'edit-subtask'
+  | 'edit-minitask'
   | 'delete-module'
   | 'delete-task'
   | 'delete-subtask'
-  | 'manage-dependencies';
+  | 'delete-minitask'
+  | 'manage-dependencies'
+  | 'move-to-galaxy';
 
 interface GalaxyContextMenuProps {
   x: number;
   y: number;
   object: CanvasObject;
-  viewType: 'solar-system' | 'module-zoom';
+  viewType: 'solar-system' | 'module-zoom' | 'task-zoom' | 'minitask-zoom';
   objects?: CanvasObject[];
   isEditMode?: boolean;
+  canDelete?: boolean;
   onAction: (action: ContextMenuAction, object: CanvasObject) => void;
   onClose: () => void;
-  onRequestDeleteConfirm?: (object: CanvasObject, action: 'delete-module' | 'delete-task' | 'delete-subtask') => void;
+  onRequestDeleteConfirm?: (object: CanvasObject, action: 'delete-module' | 'delete-task' | 'delete-subtask' | 'delete-minitask') => void;
 }
 
 export function GalaxyContextMenu({
@@ -34,10 +38,12 @@ export function GalaxyContextMenu({
   viewType,
   objects = [],
   isEditMode = false,
+  canDelete = false,
   onAction,
   onClose,
   onRequestDeleteConfirm,
 }: GalaxyContextMenuProps) {
+  const showDelete = isEditMode || canDelete;
   useEffect(() => {
     const handleClick = () => onClose();
     const handleKeyDown = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -49,7 +55,7 @@ export function GalaxyContextMenu({
     };
   }, [onClose]);
 
-  const handleDelete = (action: 'delete-module' | 'delete-task' | 'delete-subtask') => {
+  const handleDelete = (action: 'delete-module' | 'delete-task' | 'delete-subtask' | 'delete-minitask') => {
     if (onRequestDeleteConfirm) {
       onRequestDeleteConfirm(object, action);
     } else {
@@ -98,7 +104,7 @@ export function GalaxyContextMenu({
     </button>
   );
 
-  const deleteItem = (label: string, action: 'delete-module' | 'delete-task' | 'delete-subtask') => (
+  const deleteItem = (label: string, action: 'delete-module' | 'delete-task' | 'delete-subtask' | 'delete-minitask') => (
     <button
       key={action}
       type="button"
@@ -138,18 +144,29 @@ export function GalaxyContextMenu({
       break;
     case 'module':
       items = [item('Edit', 'edit-module', '✏️')];
-      if (isEditMode) items.push(deleteItem('Delete', 'delete-module'));
+      if (showDelete) items.push(deleteItem('Delete', 'delete-module'));
       if (viewType === 'module-zoom') items.push(item('Manage Dependencies', 'manage-dependencies', '🔗'));
       break;
     case 'task':
       items = [item('Edit', 'edit-task', '✏️')];
-      if (isEditMode) items.push(deleteItem('Delete', 'delete-task'));
+      if (showDelete) items.push(deleteItem('Delete', 'delete-task'));
       items.push(item('Manage Dependencies', 'manage-dependencies', '🔗'));
+      if (viewType === 'module-zoom' || viewType === 'task-zoom') {
+        items.push(item('Move to other galaxy', 'move-to-galaxy', '🌌'));
+      }
       break;
     case 'subtask':
       items = [item('Edit', 'edit-subtask', '✏️')];
-      if (isEditMode) items.push(deleteItem('Delete', 'delete-subtask'));
+      if (showDelete) items.push(deleteItem('Delete', 'delete-subtask'));
       items.push(item('Manage Dependencies', 'manage-dependencies', '🔗'));
+      break;
+    case 'minitask':
+      items = [item('Edit', 'edit-minitask', '✏️')];
+      if (showDelete) items.push(deleteItem('Delete', 'delete-minitask'));
+      items.push(item('Manage Dependencies', 'manage-dependencies', '🔗'));
+      if (viewType === 'solar-system' || viewType === 'module-zoom' || viewType === 'task-zoom' || viewType === 'minitask-zoom') {
+        items.push(item('Move to other galaxy', 'move-to-galaxy', '🌌'));
+      }
       break;
     case 'portal':
       items = [];

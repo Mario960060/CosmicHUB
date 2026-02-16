@@ -2,19 +2,30 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
-import { useCreateTask } from '@/lib/pm/mutations';
 import { createClient } from '@/lib/supabase/client';
-import { Plus, ArrowRight, MoreVertical } from 'lucide-react';
+import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
+import { toast } from 'sonner';
+import { Plus, MoreVertical, Trash2 } from 'lucide-react';
+import { CosmicDropdown } from '../CosmicDropdown';
 
 interface Idea {
   id: string;
-  text: string;
+  name: string;
+  description?: string;
   priority: 'low' | 'medium' | 'high';
   tags: string[];
   status: 'parked' | 'exploring' | 'promoted' | 'discarded';
+  assigned_to?: string | null;
   promoted_to?: string | null;
+  promote_count?: number;
+  promoted_by?: string[];
   created_by?: string;
   created_at?: string;
+}
+
+interface ProjectMember {
+  user_id: string;
+  user?: { id: string; full_name: string };
 }
 
 interface IdeasContentProps {
@@ -22,6 +33,8 @@ interface IdeasContentProps {
   satelliteData: Record<string, unknown>;
   moduleId?: string;
   projectId?: string;
+  subtaskName?: string;
+  projectMembers?: ProjectMember[];
 }
 
 function getIdeas(data: Record<string, unknown>): Idea[] {
@@ -29,11 +42,15 @@ function getIdeas(data: Record<string, unknown>): Idea[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((i: any) => ({
     id: i.id || crypto.randomUUID(),
-    text: i.text || '',
+    name: i.name ?? i.text ?? '',
+    description: i.description ?? '',
     priority: i.priority || 'medium',
     tags: Array.isArray(i.tags) ? i.tags : [],
     status: i.status || 'parked',
+    assigned_to: i.assigned_to,
     promoted_to: i.promoted_to,
+    promote_count: i.promote_count ?? 0,
+    promoted_by: Array.isArray(i.promoted_by) ? i.promoted_by : [],
     created_by: i.created_by,
     created_at: i.created_at || new Date().toISOString(),
   }));
@@ -44,68 +61,106 @@ export function IdeasContent({
   satelliteData,
   moduleId,
   projectId,
+  subtaskName = '',
+  projectMembers = [],
 }: IdeasContentProps) {
   const { user } = useAuth();
+  const invalidate = useInvalidateSatelliteQueries();
   const [ideas, setIdeas] = useState<Idea[]>(() => getIdeas(satelliteData));
   const [filter, setFilter] = useState<'all' | 'parked' | 'exploring' | 'promoted' | 'discarded'>(
     'parked'
   );
-  const [newText, setNewText] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [newPriority, setNewPriority] = useState<Idea['priority']>('medium');
   const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
-  const [showPromoteDialog, setShowPromoteDialog] = useState<Idea | null>(null);
+  const [descriptionPopupId, setDescriptionPopupId] = useState<string | null>(null);
 
   useEffect(() => {
     setIdeas(getIdeas(satelliteData));
-  }, [subtaskId]);
+  }, [subtaskId, satelliteData]);
 
-  const save = async (nextIdeas: Idea[]) => {
+  const save = async (
+    nextIdeas: Idea[],
+    activityEntry?: { user_id: string; action: string; detail: string; actor_name?: string }
+  ) => {
     setSaving(true);
-    const supabase = createClient();
-    await supabase
-      .from('subtasks')
-      .update({
-        satellite_data: { ideas: nextIdeas },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', subtaskId);
+    const { error } = await saveSatelliteData(subtaskId, { ideas: nextIdeas }, {
+      activityEntry,
+      onSuccess: () => invalidate(subtaskId),
+    });
     setSaving(false);
+    if (error) {
+      toast.error('Failed to save');
+      return;
+    }
     setIdeas(nextIdeas);
   };
 
   const addIdea = () => {
-    if (!newText.trim() || !user) return;
+    if (!newName.trim() || !user) return;
     const idea: Idea = {
       id: crypto.randomUUID(),
-      text: newText.trim(),
-      priority: 'medium',
+      name: newName.trim(),
+      description: newDescription.trim() || undefined,
+      priority: newPriority,
       tags: [],
       status: 'parked',
+      promote_count: 0,
+      promoted_by: [],
       created_by: user.id,
       created_at: new Date().toISOString(),
     };
-    const next = [...ideas, idea];
-    save(next);
-    setNewText('');
+    const next = [idea, ...ideas];
+    save(next, { user_id: user.id, action: 'added_idea', detail: idea.name, actor_name: user.full_name });
+    setNewName('');
+    setNewDescription('');
   };
 
-  const discardIdea = (id: string) => {
+  const setIdeaStatus = (id: string, status: Idea['status']) => {
+    const idea = ideas.find((i) => i.id === id);
     const next = ideas.map((i) =>
-      i.id === id ? { ...i, status: 'discarded' as const } : i
+      i.id === id ? { ...i, status } : i
     );
-    save(next);
+    save(next, { user_id: user!.id, action: 'status_change_idea', detail: `${idea?.name ?? ''} → ${status}`, actor_name: user!.full_name });
+  };
+
+  const removeIdea = (id: string) => {
+    const idea = ideas.find((i) => i.id === id);
+    const next = ideas.filter((i) => i.id !== id);
+    save(next, { user_id: user!.id, action: 'removed_idea', detail: idea?.name ?? '', actor_name: user!.full_name });
     setMenuOpen(null);
+    setDescriptionPopupId(null);
   };
 
-  const markPromoted = (id: string, taskId: string) => {
+  const assignIdea = async (id: string, userId: string | null) => {
+    const idea = ideas.find((i) => i.id === id);
     const next = ideas.map((i) =>
-      i.id === id ? { ...i, status: 'promoted' as const, promoted_to: taskId } : i
+      i.id === id ? { ...i, assigned_to: userId } : i
     );
-    save(next);
-    setShowPromoteDialog(null);
+    await save(next, { user_id: user!.id, action: 'assigned_idea', detail: idea?.name ?? '', actor_name: user!.full_name });
+    if (userId && idea) {
+      const supabase = createClient();
+      await supabase.rpc('create_notification', {
+        p_user_id: userId,
+        p_type: 'idea_assigned',
+        p_title: 'Idea assigned',
+        p_message: `You were assigned to an idea: "${idea.name}"`,
+        p_related_id: subtaskId,
+        p_related_type: 'subtask',
+        p_actor_id: user!.id,
+      });
+    }
   };
 
-  const filtered = ideas.filter((i) => filter === 'all' || i.status === filter);
+  const filtered = ideas
+    .filter((i) => filter === 'all' || i.status === filter)
+    .sort((a, b) => {
+      const ta = new Date(a.created_at ?? 0).getTime();
+      const tb = new Date(b.created_at ?? 0).getTime();
+      return tb - ta;
+    });
 
   const priorityColor = (p: Idea['priority']) => {
     switch (p) {
@@ -123,8 +178,9 @@ export function IdeasContent({
       <div
         style={{
           display: 'flex',
+          flexDirection: 'column',
           gap: '8px',
-          padding: '8px 12px',
+          padding: '12px',
           background: 'rgba(0, 0, 0, 0.2)',
           border: '1px solid rgba(168, 85, 247, 0.2)',
           borderRadius: '10px',
@@ -132,12 +188,11 @@ export function IdeasContent({
       >
         <input
           type="text"
-          value={newText}
-          onChange={(e) => setNewText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && addIdea()}
-          placeholder="Quick add idea..."
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="Idea name..."
           style={{
-            flex: 1,
+            width: '100%',
             padding: '10px 12px',
             background: 'rgba(0, 0, 0, 0.3)',
             border: '1px solid rgba(255, 255, 255, 0.2)',
@@ -147,25 +202,68 @@ export function IdeasContent({
             outline: 'none',
           }}
         />
-        <button
-          type="button"
-          onClick={addIdea}
-          disabled={saving || !newText.trim()}
+        <textarea
+          value={newDescription}
+          onChange={(e) => setNewDescription(e.target.value)}
+          placeholder="Description (optional)"
           style={{
-            padding: '10px 14px',
-            background: 'rgba(168, 85, 247, 0.3)',
-            border: '1px solid rgba(168, 85, 247, 0.5)',
+            width: '100%',
+            minHeight: '60px',
+            padding: '10px 12px',
+            background: 'rgba(0, 0, 0, 0.3)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
             borderRadius: '8px',
-            color: '#a855f7',
-            cursor: saving || !newText.trim() ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
+            color: '#fff',
+            fontSize: '13px',
+            outline: 'none',
+            resize: 'vertical',
+            fontFamily: 'inherit',
           }}
-        >
-          <Plus size={18} />
-          Add
-        </button>
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>
+            <span>Priority:</span>
+            {(['low', 'medium', 'high'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setNewPriority(p)}
+                style={{
+                  padding: '4px 10px',
+                  background: newPriority === p ? 'rgba(168, 85, 247, 0.3)' : 'rgba(0, 0, 0, 0.3)',
+                  border: `1px solid ${newPriority === p ? '#a855f7' : 'rgba(255,255,255,0.2)'}`,
+                  borderRadius: '6px',
+                  color: newPriority === p ? '#a855f7' : 'rgba(255,255,255,0.7)',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                }}
+              >
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={addIdea}
+            disabled={saving || !newName.trim()}
+            style={{
+              padding: '10px 14px',
+              background: 'rgba(168, 85, 247, 0.3)',
+              border: '1px solid rgba(168, 85, 247, 0.5)',
+              borderRadius: '8px',
+              color: '#a855f7',
+              cursor: saving || !newName.trim() ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              marginLeft: 'auto',
+            }}
+          >
+            <Plus size={18} />
+            Add
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -191,80 +289,98 @@ export function IdeasContent({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {filtered.map((idea) => (
-          <div
-            key={idea.id}
-            style={{
-              padding: '14px 16px',
-              background: 'rgba(0, 0, 0, 0.2)',
-              border: '1px solid rgba(168, 85, 247, 0.15)',
-              borderRadius: '10px',
-              position: 'relative',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: 0, fontSize: '14px', color: '#fff', lineHeight: 1.4 }}>
-                  {idea.text}
-                </p>
-                {idea.tags.length > 0 && (
-                  <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
-                    {idea.tags.map((t) => (
-                      <span
-                        key={t}
-                        style={{
-                          padding: '2px 8px',
-                          fontSize: '11px',
-                          background: 'rgba(168, 85, 247, 0.2)',
-                          borderRadius: '4px',
-                          color: '#a855f7',
-                        }}
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span
-                  style={{
-                    padding: '4px 8px',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    background: `${priorityColor(idea.priority)}22`,
-                    color: priorityColor(idea.priority),
-                    borderRadius: '8px',
-                  }}
-                >
-                  {idea.priority}
-                </span>
-                {idea.status === 'parked' && moduleId && (
-                  <button
-                    type="button"
-                    onClick={() => setShowPromoteDialog(idea)}
+        {filtered.map((idea) => {
+          const showDescriptionPopup = descriptionPopupId === idea.id;
+          return (
+            <div
+              key={idea.id}
+              onClick={() => setDescriptionPopupId(idea.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenuOpen(menuOpen === idea.id ? null : idea.id);
+              }}
+              style={{
+                padding: '14px 16px',
+                background: 'rgba(0, 0, 0, 0.2)',
+                border: '1px solid rgba(168, 85, 247, 0.15)',
+                borderRadius: '10px',
+                position: 'relative',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: '14px', color: '#fff', lineHeight: 1.4 }}>
+                    {idea.name}
+                  </p>
+                  {idea.description && (
+                    <p
+                      style={{
+                        margin: '4px 0 0',
+                        fontSize: '12px',
+                        color: 'rgba(255,255,255,0.5)',
+                        lineHeight: 1.3,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {idea.description}
+                    </p>
+                  )}
+                  {idea.tags.length > 0 && (
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+                      {idea.tags.map((t) => (
+                        <span
+                          key={t}
+                          style={{
+                            padding: '2px 8px',
+                            fontSize: '11px',
+                            background: 'rgba(168, 85, 247, 0.2)',
+                            borderRadius: '4px',
+                            color: '#a855f7',
+                          }}
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                  <span
                     style={{
-                      padding: '6px 10px',
-                      background: 'rgba(168, 85, 247, 0.2)',
-                      border: '1px solid rgba(168, 85, 247, 0.4)',
-                      borderRadius: '6px',
-                      color: '#a855f7',
-                      fontSize: '12px',
+                      padding: '4px 8px',
+                      fontSize: '11px',
                       fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
+                      background: `${priorityColor(idea.priority)}22`,
+                      color: priorityColor(idea.priority),
+                      borderRadius: '8px',
                     }}
                   >
-                    Promote <ArrowRight size={14} />
-                  </button>
-                )}
-                {idea.status === 'parked' && (
+                    {idea.priority}
+                  </span>
+                  {projectMembers.length > 0 && (
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <CosmicDropdown
+                        value={idea.assigned_to ?? '__none__'}
+                        options={[
+                          { value: '__none__', label: 'Unassigned' },
+                          ...projectMembers.map((pm) => ({
+                            value: pm.user_id,
+                            label: pm.user?.full_name ?? 'Unknown',
+                          })),
+                        ]}
+                        onChange={(v) => assignIdea(idea.id, v === '__none__' ? null : v)}
+                        style={{ minWidth: 100 }}
+                      />
+                    </div>
+                  )}
                   <div style={{ position: 'relative' }}>
                     <button
                       type="button"
-                      onClick={() => setMenuOpen(menuOpen === idea.id ? null : idea.id)}
+                      onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === idea.id ? null : idea.id); }}
                       style={{
                         padding: '4px',
                         background: 'none',
@@ -283,7 +399,7 @@ export function IdeasContent({
                           right: 0,
                           marginTop: '4px',
                           padding: '8px',
-                          background: 'rgba(0,0,0,0.9)',
+                          background: 'rgba(0,0,0,0.95)',
                           border: '1px solid rgba(255,255,255,0.2)',
                           borderRadius: '8px',
                           zIndex: 10,
@@ -292,7 +408,7 @@ export function IdeasContent({
                       >
                         <button
                           type="button"
-                          onClick={() => discardIdea(idea.id)}
+                          onClick={(e) => { e.stopPropagation(); removeIdea(idea.id); }}
                           style={{
                             width: '100%',
                             padding: '8px 12px',
@@ -303,19 +419,99 @@ export function IdeasContent({
                             fontSize: '13px',
                             cursor: 'pointer',
                             borderRadius: '4px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
                           }}
                         >
-                          Discard
+                          <Trash2 size={14} />
+                          Remove
                         </button>
                       </div>
                     )}
                   </div>
-                )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      {descriptionPopupId && (() => {
+        const idea = ideas.find((i) => i.id === descriptionPopupId);
+        if (!idea) return null;
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setDescriptionPopupId(null)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: 'rgba(0, 0, 0, 0.95)',
+                border: '1px solid rgba(168, 85, 247, 0.4)',
+                borderRadius: '12px',
+                padding: '20px',
+                maxWidth: 400,
+                width: '90%',
+              }}
+            >
+              <h3 style={{ margin: '0 0 12px', fontSize: '16px', color: '#a855f7' }}>{idea.name}</h3>
+              <p style={{ margin: 0, fontSize: '14px', color: 'rgba(255,255,255,0.85)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                {idea.description || 'No description'}
+              </p>
+              <div style={{ marginTop: '16px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {(['parked', 'exploring', 'promoted', 'discarded'] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setIdeaStatus(idea.id, s); setDescriptionPopupId(null); }}
+                    disabled={saving || idea.status === s}
+                    style={{
+                      padding: '6px 10px',
+                      background: idea.status === s ? 'rgba(168, 85, 247, 0.3)' : 'rgba(0, 0, 0, 0.3)',
+                      border: `1px solid ${idea.status === s ? '#a855f7' : 'rgba(255,255,255,0.2)'}`,
+                      borderRadius: '6px',
+                      color: idea.status === s ? '#a855f7' : 'rgba(255,255,255,0.8)',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: saving || idea.status === s ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {s.charAt(0).toUpperCase() + s.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setDescriptionPopupId(null)}
+                style={{
+                  marginTop: '16px',
+                  padding: '8px 16px',
+                  background: 'rgba(168, 85, 247, 0.3)',
+                  border: '1px solid rgba(168, 85, 247, 0.5)',
+                  borderRadius: '8px',
+                  color: '#a855f7',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {filtered.length === 0 && (
         <div
@@ -329,138 +525,6 @@ export function IdeasContent({
           No ideas in this status. Add one above or change filter.
         </div>
       )}
-
-      {showPromoteDialog && moduleId && (
-        <PromoteToTaskDialog
-          idea={showPromoteDialog}
-          moduleId={moduleId}
-          projectId={projectId}
-          onClose={() => setShowPromoteDialog(null)}
-          onSuccess={(taskId) => markPromoted(showPromoteDialog.id, taskId)}
-        />
-      )}
-    </div>
-  );
-}
-
-interface PromoteToTaskDialogProps {
-  idea: Idea;
-  moduleId: string;
-  projectId?: string;
-  onClose: () => void;
-  onSuccess: (taskId: string) => void;
-}
-
-function PromoteToTaskDialog({
-  idea,
-  moduleId,
-  onClose,
-  onSuccess,
-}: PromoteToTaskDialogProps) {
-  const { user } = useAuth();
-  const createTask = useCreateTask();
-  const [name, setName] = useState(idea.text);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setName(idea.text);
-  }, [idea]);
-
-  const handleSubmit = async () => {
-    if (!user) return;
-    setSaving(true);
-    try {
-      const data = await createTask.mutateAsync({
-        moduleId,
-        name,
-        createdBy: user.id,
-        priorityStars: 1.5,
-      });
-      onSuccess((data as { id: string }).id);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.7)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 50,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: 'rgba(0,0,0,0.95)',
-          border: '1px solid rgba(168, 85, 247, 0.3)',
-          borderRadius: '16px',
-          padding: '24px',
-          minWidth: 360,
-          maxWidth: '90%',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ margin: '0 0 16px', fontSize: '16px', color: '#fff' }}>
-          Promote to Task
-        </h3>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Task name"
-          style={{
-            width: '100%',
-            padding: '12px 14px',
-            marginBottom: '16px',
-            background: 'rgba(0,0,0,0.5)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: '8px',
-            color: '#fff',
-            fontSize: '14px',
-            outline: 'none',
-          }}
-        />
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: '10px 16px',
-              background: 'rgba(255,255,255,0.1)',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: '8px',
-              color: '#fff',
-              fontSize: '14px',
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={saving || !name.trim()}
-            style={{
-              padding: '10px 16px',
-              background: 'rgba(168, 85, 247, 0.3)',
-              border: '1px solid rgba(168, 85, 247, 0.5)',
-              borderRadius: '8px',
-              color: '#a855f7',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: saving || !name.trim() ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {saving ? 'Creating...' : 'Create Task'}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

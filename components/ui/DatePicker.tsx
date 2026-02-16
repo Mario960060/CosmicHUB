@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   format,
   parse,
@@ -30,6 +31,8 @@ interface DatePickerProps {
   max?: string;
   /** Extra Tailwind classes for the trigger button */
   buttonClassName?: string;
+  /** Render calendar in portal (fixes clipping inside modals) */
+  usePortal?: boolean;
 }
 
 export function DatePicker({
@@ -40,8 +43,11 @@ export function DatePicker({
   min,
   max,
   buttonClassName,
+  usePortal = true,
 }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [panelPosition, setPanelPosition] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [viewMonth, setViewMonth] = useState(() => {
     const current = value ? parse(value, INPUT_DATE_FORMAT, new Date()) : new Date();
     return startOfMonth(current);
@@ -62,11 +68,22 @@ export function DatePicker({
     }
   }, [value]);
 
-  // Click outside to close
+  // Update panel position when opening (for portal mode)
+  useEffect(() => {
+    if (isOpen && usePortal && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPanelPosition({ top: rect.bottom + 8, left: rect.left });
+    }
+  }, [isOpen, usePortal]);
+
+  // Click outside to close (panel może być w portalu – sprawdzamy też panelRef)
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inTrigger = containerRef.current?.contains(target);
+      const inPanel = panelRef.current?.contains(target);
+      if (!inTrigger && !inPanel) {
         setIsOpen(false);
       }
     };
@@ -137,6 +154,7 @@ export function DatePicker({
     <div ref={containerRef} className="relative w-full" style={{ fontFamily: "'Exo 2', sans-serif" }}>
       {/* ---- Trigger Button ---- */}
       <button
+        ref={triggerRef}
         id={id}
         type="button"
         onClick={() => setIsOpen((o) => !o)}
@@ -182,11 +200,16 @@ export function DatePicker({
       </button>
 
       {/* ---- Calendar Panel ---- */}
-      {isOpen && (
+      {isOpen && (() => {
+        const panelEl = (
         <div
           ref={panelRef}
-          className="absolute z-50 mt-2 left-0"
+          className="z-[9999]"
           style={{
+            position: usePortal ? 'fixed' : 'absolute',
+            top: usePortal ? panelPosition.top : undefined,
+            left: usePortal ? panelPosition.left : 0,
+            marginTop: usePortal ? 0 : 8,
             width: '300px',
             borderRadius: '14px',
             overflow: 'hidden',
@@ -466,7 +489,11 @@ export function DatePicker({
             </div>
           </div>
         </div>
-      )}
+        );
+        return usePortal && typeof document !== 'undefined'
+          ? createPortal(panelEl, document.body)
+          : panelEl;
+      })()}
 
       {/* Animation keyframe injected once */}
       <style>{`

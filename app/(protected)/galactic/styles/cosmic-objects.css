@@ -240,25 +240,47 @@
   );
 }
 
-/* Sun Label */
-.sun-label {
+/* Sun Labels – inside the circle (centered) */
+.sun-labels-inset {
   position: absolute;
-  bottom: -30px;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 85%;
+  max-width: 180px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.sun-name-label {
   font-family: 'Exo 2', sans-serif;
   font-size: 14px;
-  font-weight: 600;
-  color: var(--gold-sun);
-  text-shadow: 0 0 8px rgba(255, 184, 0, 0.8);
-  max-width: 180px;
+  font-weight: 800;
+  -webkit-font-smoothing: antialiased;
   text-align: center;
   word-wrap: break-word;
   overflow-wrap: break-word;
   word-break: break-word;
   text-transform: uppercase;
   letter-spacing: 1px;
-  line-height: 1.3;
+  line-height: 1.2;
+  color: #000 !important;
+  text-shadow: 0 2px 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7);
+}
+
+.sun-deadline-label {
+  font-family: 'Exo 2', sans-serif;
+  font-size: 12px;
+  font-weight: 900;
+  -webkit-font-smoothing: antialiased;
+  color: #ef4444 !important;
+  text-shadow: 0 0 8px rgba(239, 68, 68, 0.95), 0 2px 4px rgba(0,0,0,0.3);
+  white-space: nowrap;
 }
 
 /* =============== 2. PLANETA / PLANET (MODULE) =============== */
@@ -458,6 +480,10 @@
   mix-blend-mode: saturation;
   pointer-events: none;
   z-index: 1;
+}
+
+.asteroid .burnout-overlay {
+  border-radius: 45% 55% 52% 48% / 48% 52% 48% 52%;
 }
 
 .deadline-aura {
@@ -1470,6 +1496,179 @@
 }
 @keyframes cmLed { 0%, 40%, 100% { opacity: 0.3; } 50%, 60% { opacity: 1; } }
 
+/* ─── NEXUS DRONE (Canvas) ─── Mapping satellite with holographic projector + node arms */
+.nexus-drone {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  animation: floatSlow 6s ease-in-out infinite;
+  cursor: pointer;
+}
+.nexus-drone.sm { transform-origin: center center; transform: scale(0.55); }
+.nexus-drone .nd-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(135deg, #2a1e10 0%, #1a1208 50%, #2a1e10 100%);
+  border: 1.5px solid rgba(249,115,22,0.35);
+  border-radius: 4px;
+  box-shadow: inset 0 0 8px rgba(249,115,22,0.08), 0 0 14px rgba(249,115,22,0.1);
+  z-index: 3;
+}
+.nexus-drone .nd-core::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  background:
+    linear-gradient(0deg, rgba(249,115,22,0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(249,115,22,0.12) 1px, transparent 1px);
+  background-size: 5px 5px;
+  border-radius: 2px;
+}
+.nexus-drone .nd-lens {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fdba74 0%, #f97316 50%, rgba(249,115,22,0.2) 100%);
+  box-shadow: 0 0 8px rgba(249,115,22,0.6), 0 0 18px rgba(249,115,22,0.2);
+  z-index: 4;
+  animation: ndLensPulse 2.5s ease-in-out infinite;
+}
+.nexus-drone .nd-holo-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(249,115,22,0.2);
+  border-top-color: rgba(249,115,22,0.5);
+  border-radius: 50%;
+  animation: ndRingSpin 4s linear infinite;
+  z-index: 2;
+}
+.nexus-drone .nd-holo-ring2 {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(249,115,22,0.1);
+  border-bottom-color: rgba(249,115,22,0.35);
+  border-radius: 50%;
+  animation: ndRingSpin 6s linear infinite reverse;
+  z-index: 1;
+}
+.nexus-drone .nd-arm {
+  position: absolute;
+  background: rgba(249,115,22,0.2);
+  z-index: 2;
+}
+.nexus-drone .nd-arm-tr { top: 8px; right: 8px; width: 16px; height: 1.5px; transform: rotate(-45deg); transform-origin: right center; }
+.nexus-drone .nd-arm-tl { top: 8px; left: 8px; width: 16px; height: 1.5px; transform: rotate(45deg); transform-origin: left center; }
+.nexus-drone .nd-arm-br { bottom: 8px; right: 8px; width: 16px; height: 1.5px; transform: rotate(45deg); transform-origin: right center; }
+.nexus-drone .nd-arm-bl { bottom: 8px; left: 8px; width: 16px; height: 1.5px; transform: rotate(-45deg); transform-origin: left center; }
+.nexus-drone .nd-node {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(249,115,22,0.35);
+  border-radius: 2px;
+  background: rgba(249,115,22,0.06);
+  z-index: 3;
+}
+.nexus-drone .nd-node::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: #f97316;
+  box-shadow: 0 0 3px rgba(249,115,22,0.5);
+}
+.nexus-drone .nd-node-tr { top: 1px; right: 1px; animation: ndNodePulse 3s ease-in-out infinite 0s; }
+.nexus-drone .nd-node-tl { top: 1px; left: 1px; animation: ndNodePulse 3s ease-in-out infinite 0.7s; }
+.nexus-drone .nd-node-br { bottom: 1px; right: 1px; animation: ndNodePulse 3s ease-in-out infinite 1.4s; }
+.nexus-drone .nd-node-bl { bottom: 1px; left: 1px; animation: ndNodePulse 3s ease-in-out infinite 2.1s; }
+.nexus-drone .nd-conn {
+  position: absolute;
+  background: rgba(249,115,22,0.1);
+  z-index: 1;
+}
+.nexus-drone .nd-conn-top { top: 4px; left: 8px; right: 8px; height: 1px; animation: ndConnFlicker 4s ease-in-out infinite; }
+.nexus-drone .nd-conn-right { right: 4px; top: 8px; bottom: 8px; width: 1px; animation: ndConnFlicker 4s ease-in-out infinite 1s; }
+.nexus-drone .nd-conn-bottom { bottom: 4px; left: 8px; right: 8px; height: 1px; animation: ndConnFlicker 4s ease-in-out infinite 2s; }
+.nexus-drone .nd-conn-left { left: 4px; top: 8px; bottom: 8px; width: 1px; animation: ndConnFlicker 4s ease-in-out infinite 3s; }
+.nexus-drone .nd-wing-t, .nexus-drone .nd-wing-b {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 5px;
+  border: 1px solid rgba(249,115,22,0.2);
+  background: linear-gradient(0deg, rgba(249,115,22,0.04), rgba(249,115,22,0.08));
+  z-index: 2;
+}
+.nexus-drone .nd-wing-t { top: 10px; border-radius: 2px 2px 0 0; border-bottom: none; }
+.nexus-drone .nd-wing-b { bottom: 10px; border-radius: 0 0 2px 2px; border-top: none; }
+.nexus-drone .nd-data {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  background: #fdba74;
+  border-radius: 50%;
+  box-shadow: 0 0 4px rgba(249,115,22,0.6);
+  z-index: 5;
+}
+.nexus-drone .nd-data:nth-child(1) { animation: ndDataFlowH 3s linear infinite; top: 3.5px; }
+.nexus-drone .nd-data:nth-child(2) { animation: ndDataFlowV 3.5s linear infinite 1s; right: 3.5px; }
+.nexus-drone .nd-data:nth-child(3) { animation: ndDataFlowH2 4s linear infinite 0.5s; bottom: 3.5px; }
+@keyframes ndLensPulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(249,115,22,0.5), 0 0 14px rgba(249,115,22,0.15); }
+  50% { box-shadow: 0 0 12px rgba(249,115,22,0.7), 0 0 24px rgba(249,115,22,0.3); }
+}
+@keyframes ndRingSpin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+@keyframes ndNodePulse {
+  0%, 100% { border-color: rgba(249,115,22,0.25); box-shadow: none; }
+  50% { border-color: rgba(249,115,22,0.5); box-shadow: 0 0 6px rgba(249,115,22,0.15); }
+}
+@keyframes ndConnFlicker {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+@keyframes ndDataFlowH {
+  0% { left: 8px; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { left: calc(100% - 10px); opacity: 0; }
+}
+@keyframes ndDataFlowV {
+  0% { top: 8px; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: calc(100% - 10px); opacity: 0; }
+}
+@keyframes ndDataFlowH2 {
+  0% { right: 8px; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { right: calc(100% - 10px); opacity: 0; }
+}
+
 /* Satellite Label */
 .sat-name-label {
   position: absolute;
@@ -1612,6 +1811,93 @@
 /* Miniature moon */
 .moon.sm .object-stars-crown { top: -14px; }
 .moon.sm .moon-labels-inset { width: 90%; max-width: 55px; gap: 0; }
+
+/* =============== 5. ASTEROID (MINITASK) =============== */
+/* Rocky asteroid - irregular shape, grayish-brown, subtle rotation */
+
+.asteroid {
+  position: absolute;
+  cursor: pointer;
+  transition: transform 0.3s ease;
+  animation: asteroidFloat 8s ease-in-out infinite;
+}
+
+.asteroid:hover {
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+.asteroid.rocky {
+  width: 50px;
+  height: 50px;
+  border-radius: 45% 55% 52% 48% / 48% 52% 48% 52%;
+  background: radial-gradient(circle at 35% 35%,
+    #a8a29e 0%,
+    #78716c 35%,
+    #57534e 60%,
+    #44403c 100%
+  );
+  box-shadow:
+    inset -4px 4px 8px rgba(0, 0, 0, 0.5),
+    0 0 12px rgba(120, 113, 108, 0.4);
+}
+
+.asteroid .asteroid-crater {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.4), transparent);
+}
+
+.asteroid .asteroid-crater.cr1 { width: 8px; height: 8px; top: 25%; left: 35%; }
+.asteroid .asteroid-crater.cr2 { width: 5px; height: 5px; top: 55%; left: 55%; }
+.asteroid .asteroid-crater.cr3 { width: 6px; height: 6px; top: 40%; left: 18%; }
+
+@keyframes asteroidFloat {
+  0%, 100% { transform: translate(-50%, -50%) rotate(0deg); }
+  50% { transform: translate(-50%, -50%) rotate(5deg); }
+}
+
+.asteroid.sm {
+  width: 18px;
+  height: 18px;
+}
+
+.asteroid.sm .asteroid-crater { display: none; }
+
+.asteroid-labels-inset {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 120%;
+  max-width: 70px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.asteroid-name-label {
+  font-family: 'Exo 2', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.asteroid-deadline-label {
+  font-family: 'Exo 2', sans-serif;
+  font-weight: 900;
+  -webkit-font-smoothing: antialiased;
+  color: #ef4444 !important;
+  text-shadow: 0 0 8px rgba(239, 68, 68, 0.95), 0 2px 4px rgba(0,0,0,0.3);
+  white-space: nowrap;
+}
 
 /* =============== PORTAL / GALAXY VORTEX =============== */
 /* Portal navigates to another module. Color = destination planet color (--portal-color) */

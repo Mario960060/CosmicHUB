@@ -4,7 +4,15 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { createClient } from '@/lib/supabase/client';
 import { formatRelativeTime } from '@/lib/utils';
-import { AlertTriangle, Plus } from 'lucide-react';
+import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
+import { toast } from 'sonner';
+import { CosmicDropdown } from '../CosmicDropdown';
+import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
+
+interface AssignablePerson {
+  user_id: string;
+  user?: { id: string; full_name: string };
+}
 
 interface Issue {
   id: string;
@@ -15,6 +23,7 @@ interface Issue {
   type: 'bug' | 'risk' | 'debt' | 'warning';
   reported_by?: string;
   assigned_to?: string | null;
+  assigned_to_all?: boolean;
   created_at: string;
   resolved_at?: string | null;
   linked_task_id?: string | null;
@@ -24,6 +33,12 @@ interface Issue {
 interface IssuesContentProps {
   subtaskId: string;
   satelliteData: Record<string, unknown>;
+  subtaskName?: string;
+  assignablePeople?: AssignablePerson[];
+  createdBy?: string | null;
+  isAdmin?: boolean;
+  isProjectManager?: boolean;
+  isTaskResponsible?: boolean;
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -32,6 +47,14 @@ const SEVERITY_COLORS: Record<string, string> = {
   medium: '#f59e0b',
   low: '#22c55e',
 };
+
+function normalizeAssignable(people: AssignablePerson[] | undefined): AssignablePerson[] {
+  if (!Array.isArray(people)) return [];
+  return people.map((p) => ({
+    user_id: p.user_id,
+    user: p.user ?? { id: p.user_id, full_name: 'Unknown' },
+  }));
+}
 
 function getIssues(data: Record<string, unknown>): Issue[] {
   const raw = data.issues;
@@ -45,6 +68,7 @@ function getIssues(data: Record<string, unknown>): Issue[] {
     type: i.type || 'bug',
     reported_by: i.reported_by,
     assigned_to: i.assigned_to,
+    assigned_to_all: i.assigned_to_all ?? false,
     created_at: i.created_at || new Date().toISOString(),
     resolved_at: i.resolved_at,
     linked_task_id: i.linked_task_id,
@@ -52,8 +76,18 @@ function getIssues(data: Record<string, unknown>): Issue[] {
   }));
 }
 
-export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) {
+export function IssuesContent({
+  subtaskId,
+  satelliteData,
+  subtaskName = '',
+  assignablePeople = [],
+  createdBy,
+  isAdmin = false,
+  isProjectManager = false,
+  isTaskResponsible = false,
+}: IssuesContentProps) {
   const { user } = useAuth();
+  const invalidate = useInvalidateSatelliteQueries();
   const [issues, setIssues] = useState<Issue[]>(() => getIssues(satelliteData));
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');
@@ -65,21 +99,27 @@ export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const people = normalizeAssignable(assignablePeople);
+  const canDelete = !!user && (isAdmin || isProjectManager || isTaskResponsible || createdBy === user.id);
+
   useEffect(() => {
     setIssues(getIssues(satelliteData));
-  }, [subtaskId]);
+  }, [subtaskId, satelliteData]);
 
-  const save = async (next: Issue[]) => {
+  const save = async (
+    next: Issue[],
+    activityEntry?: { user_id: string; action: string; detail: string; actor_name?: string }
+  ) => {
     setSaving(true);
-    const supabase = createClient();
-    await supabase
-      .from('subtasks')
-      .update({
-        satellite_data: { issues: next },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', subtaskId);
+    const { error } = await saveSatelliteData(subtaskId, { issues: next }, {
+      activityEntry,
+      onSuccess: () => invalidate(subtaskId),
+    });
     setSaving(false);
+    if (error) {
+      toast.error('Failed to save');
+      return;
+    }
     setIssues(next);
   };
 
@@ -96,14 +136,56 @@ export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) 
       created_at: new Date().toISOString(),
       comments: [],
     };
-    const next = [...issues, issue];
-    save(next);
+    const next = [issue, ...issues];
+    save(next, { user_id: user.id, action: 'added_issue', detail: newTitle.trim(), actor_name: user.full_name });
     setNewTitle('');
     setNewDesc('');
     setShowReport(false);
   };
 
+  const assignIssue = async (id: string, value: string) => {
+    const issue = issues.find((i) => i.id === id);
+    if (!issue) return;
+    const isAssignAll = value === '__all__';
+    const userId = isAssignAll ? null : (value === '__none__' ? null : value);
+    const next = issues.map((i) =>
+      i.id === id
+        ? {
+            ...i,
+            assigned_to: userId,
+            assigned_to_all: isAssignAll,
+          }
+        : i
+    );
+    await save(next, { user_id: user!.id, action: 'assigned_issue', detail: issue.title ?? '', actor_name: user!.full_name });
+    const supabase = createClient();
+    if (isAssignAll && people.length > 0) {
+      for (const p of people) {
+        await supabase.rpc('create_notification', {
+          p_user_id: p.user_id,
+          p_type: 'issue_assigned',
+          p_title: 'Issue assigned',
+          p_message: `You were assigned to an issue: "${issue.title}"`,
+          p_related_id: subtaskId,
+          p_related_type: 'subtask',
+          p_actor_id: user!.id,
+        });
+      }
+    } else if (userId) {
+      await supabase.rpc('create_notification', {
+        p_user_id: userId,
+        p_type: 'issue_assigned',
+        p_title: 'Issue assigned',
+        p_message: `You were assigned to an issue: "${issue.title}"`,
+        p_related_id: subtaskId,
+        p_related_type: 'subtask',
+        p_actor_id: user!.id,
+      });
+    }
+  };
+
   const updateStatus = (id: string, status: Issue['status']) => {
+    const issue = issues.find((i) => i.id === id);
     const next = issues.map((i) =>
       i.id === id
         ? {
@@ -113,7 +195,15 @@ export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) 
           }
         : i
     );
-    save(next);
+    save(next, { user_id: user!.id, action: 'status_change_issue', detail: `${issue?.title ?? ''} → ${status}`, actor_name: user!.full_name });
+  };
+
+  const deleteIssue = (id: string) => {
+    if (!canDelete) return;
+    const issue = issues.find((i) => i.id === id);
+    const next = issues.filter((i) => i.id !== id);
+    save(next, { user_id: user!.id, action: 'deleted_issue', detail: issue?.title ?? '', actor_name: user!.full_name });
+    setExpandedId(null);
   };
 
   const filtered = issues.filter((i) => {
@@ -126,47 +216,36 @@ export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) 
   const mediumCount = issues.filter((i) => i.severity === 'medium').length;
   const fixedCount = issues.filter((i) => i.status === 'fixed').length;
 
+  const getAssignValue = (issue: Issue) => {
+    if (issue.assigned_to_all) return '__all__';
+    return issue.assigned_to ?? '__none__';
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '4px' }}>
-        <select
+        <CosmicDropdown
           value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          style={{
-            padding: '6px 10px',
-            background: 'rgba(0, 0, 0, 0.3)',
-            border: '1px solid rgba(0, 217, 255, 0.2)',
-            borderRadius: '8px',
-            color: '#fff',
-            fontSize: '12px',
-            fontWeight: 600,
-          }}
-        >
-          <option value="all">All status</option>
-          <option value="open">Open</option>
-          <option value="in_progress">In Progress</option>
-          <option value="fixed">Fixed</option>
-          <option value="wont_fix">Won&apos;t Fix</option>
-        </select>
-        <select
+          options={[
+            { value: 'all', label: 'All status' },
+            { value: 'open', label: 'Open' },
+            { value: 'in_progress', label: 'In Progress' },
+            { value: 'fixed', label: 'Fixed' },
+            { value: 'wont_fix', label: "Won't Fix" },
+          ]}
+          onChange={(v) => setFilterStatus(v)}
+        />
+        <CosmicDropdown
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          style={{
-            padding: '6px 10px',
-            background: 'rgba(0, 0, 0, 0.3)',
-            border: '1px solid rgba(0, 217, 255, 0.2)',
-            borderRadius: '8px',
-            color: '#fff',
-            fontSize: '12px',
-            fontWeight: 600,
-          }}
-        >
-          <option value="all">All types</option>
-          <option value="bug">Bug</option>
-          <option value="risk">Risk</option>
-          <option value="debt">Debt</option>
-          <option value="warning">Warning</option>
-        </select>
+          options={[
+            { value: 'all', label: 'All types' },
+            { value: 'bug', label: 'Bug' },
+            { value: 'risk', label: 'Risk' },
+            { value: 'debt', label: 'Debt' },
+            { value: 'warning', label: 'Warning' },
+          ]}
+          onChange={(v) => setFilterType(v)}
+        />
         <span style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.5)', alignSelf: 'center' }}>
           {criticalCount > 0 && <span style={{ color: '#ef4444' }}>🔴 {criticalCount} critical</span>}
           {mediumCount > 0 && (
@@ -195,7 +274,7 @@ export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) 
           }}
         >
           <Plus size={16} />
-          Report Issue
+          + Report Issue
         </button>
       </div>
 
@@ -245,40 +324,28 @@ export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) 
             }}
           />
           <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
-            <select
+            <CosmicDropdown
               value={newSeverity}
-              onChange={(e) => setNewSeverity(e.target.value as Issue['severity'])}
-              style={{
-                padding: '8px 12px',
-                background: 'rgba(0, 0, 0, 0.3)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                borderRadius: '8px',
-                color: '#fff',
-                fontSize: '13px',
-              }}
-            >
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-            <select
+              options={[
+                { value: 'critical', label: 'Critical' },
+                { value: 'high', label: 'High' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'low', label: 'Low' },
+              ]}
+              onChange={(v) => setNewSeverity(v as Issue['severity'])}
+              style={{ minWidth: 120 }}
+            />
+            <CosmicDropdown
               value={newType}
-              onChange={(e) => setNewType(e.target.value as Issue['type'])}
-              style={{
-                padding: '8px 12px',
-                background: 'rgba(0, 0, 0, 0.3)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                borderRadius: '8px',
-                color: '#fff',
-                fontSize: '13px',
-              }}
-            >
-              <option value="bug">Bug</option>
-              <option value="risk">Risk</option>
-              <option value="debt">Debt</option>
-              <option value="warning">Warning</option>
-            </select>
+              options={[
+                { value: 'bug', label: 'Bug' },
+                { value: 'risk', label: 'Risk' },
+                { value: 'debt', label: 'Debt' },
+                { value: 'warning', label: 'Warning' },
+              ]}
+              onChange={(v) => setNewType(v as Issue['type'])}
+              style={{ minWidth: 120 }}
+            />
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
@@ -353,7 +420,26 @@ export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) 
                   {issue.severity} · {issue.type}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>{issue.title}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>{issue.title}</span>
+                    {people.length > 0 && (
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <CosmicDropdown
+                          value={getAssignValue(issue)}
+                          options={[
+                            { value: '__none__', label: 'Unassigned' },
+                            { value: '__all__', label: 'Assign all' },
+                            ...people.map((pm) => ({
+                              value: pm.user_id,
+                              label: pm.user?.full_name ?? 'Unknown',
+                            })),
+                          ]}
+                          onChange={(v) => assignIssue(issue.id, v)}
+                          style={{ minWidth: 130 }}
+                        />
+                      </div>
+                    )}
+                  </div>
                   <div
                     style={{
                       fontSize: '12px',
@@ -377,7 +463,7 @@ export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) 
                 </div>
               </div>
 
-              {isExpanded && !isResolved && (
+              {isExpanded && (
                 <div
                   onClick={(e) => e.stopPropagation()}
                   style={{
@@ -389,54 +475,47 @@ export function IssuesContent({ subtaskId, satelliteData }: IssuesContentProps) 
                     flexWrap: 'wrap',
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => updateStatus(issue.id, 'in_progress')}
-                    disabled={saving}
-                    style={{
-                      padding: '6px 12px',
-                      background: 'rgba(245, 158, 11, 0.2)',
-                      border: '1px solid rgba(245, 158, 11, 0.4)',
-                      borderRadius: '6px',
-                      color: '#f59e0b',
-                      fontSize: '12px',
-                      cursor: saving ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    In Progress
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => updateStatus(issue.id, 'fixed')}
-                    disabled={saving}
-                    style={{
-                      padding: '6px 12px',
-                      background: 'rgba(34, 197, 94, 0.2)',
-                      border: '1px solid rgba(34, 197, 94, 0.4)',
-                      borderRadius: '6px',
-                      color: '#22c55e',
-                      fontSize: '12px',
-                      cursor: saving ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    Fixed
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => updateStatus(issue.id, 'wont_fix')}
-                    disabled={saving}
-                    style={{
-                      padding: '6px 12px',
-                      background: 'rgba(107, 114, 128, 0.2)',
-                      border: '1px solid rgba(107, 114, 128, 0.4)',
-                      borderRadius: '6px',
-                      color: '#9ca3af',
-                      fontSize: '12px',
-                      cursor: saving ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    Won&apos;t Fix
-                  </button>
+                  {(['open', 'in_progress', 'fixed', 'wont_fix'] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => updateStatus(issue.id, s)}
+                      disabled={saving || issue.status === s}
+                      style={{
+                        padding: '6px 12px',
+                        background: issue.status === s ? 'rgba(0, 217, 255, 0.2)' : 'rgba(0, 0, 0, 0.3)',
+                        border: `1px solid ${issue.status === s ? '#00d9ff' : 'rgba(255, 255, 255, 0.2)'}`,
+                        borderRadius: '6px',
+                        color: issue.status === s ? '#00d9ff' : 'rgba(255, 255, 255, 0.8)',
+                        fontSize: '12px',
+                        cursor: saving || issue.status === s ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {s === 'wont_fix' ? "Won't Fix" : s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={() => deleteIssue(issue.id)}
+                      disabled={saving}
+                      style={{
+                        padding: '6px 12px',
+                        background: 'rgba(239, 68, 68, 0.2)',
+                        border: '1px solid rgba(239, 68, 68, 0.4)',
+                        borderRadius: '6px',
+                        color: '#ef4444',
+                        fontSize: '12px',
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      Delete
+                    </button>
+                  )}
                 </div>
               )}
             </div>

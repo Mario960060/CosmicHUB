@@ -23,6 +23,11 @@ body {
   50% { opacity: 1; }
 }
 
+@keyframes starsTwinkle {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
 @keyframes pulse-slow {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
@@ -484,28 +489,29 @@ input:-webkit-autofill:active {
 
 .scrollbar-cosmic {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 240, 255, 0.4) rgba(0, 240, 255, 0.08);
+  scrollbar-color: rgba(0, 217, 255, 0.5) #161b22;
 }
 
 .scrollbar-cosmic::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 .scrollbar-cosmic::-webkit-scrollbar-track {
-  background: rgba(0, 240, 255, 0.06);
-  border-radius: 4px;
+  background: #0d1117;
+  border-radius: 5px;
 }
 
 .scrollbar-cosmic::-webkit-scrollbar-thumb {
-  background: rgba(0, 240, 255, 0.35);
-  border-radius: 4px;
+  background: rgba(0, 217, 255, 0.4);
+  border-radius: 5px;
+  border: 2px solid #0d1117;
 }
 
 .scrollbar-cosmic::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 240, 255, 0.55);
+  background: rgba(0, 217, 255, 0.65);
 }
 
 .scrollbar-cosmic::-webkit-scrollbar-corner {
-  background: transparent;
+  background: #0d1117;
 }

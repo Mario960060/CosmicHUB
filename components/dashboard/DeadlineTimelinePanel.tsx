@@ -75,7 +75,7 @@ export function DeadlineTimelinePanel({ deadlines }: DeadlineTimelinePanelProps)
         })}
       </div>
 
-      <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+      <div className="scrollbar-cosmic" style={{ maxHeight: '280px', overflowY: 'auto' }}>
         {(byBucket[activeBucket] ?? []).map((d) => {
           const riskColor = RISK_COLORS[d.risk.level] ?? RISK_COLORS.none;
           return (

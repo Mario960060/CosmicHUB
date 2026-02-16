@@ -176,7 +176,7 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
   const daysRemaining = calculateDaysRemaining(data.due_date);
   const dueStyle = getDueDateStyle(daysRemaining);
   const taskCounts = countTasksByStatus(tasks);
-  const estimatedTotal = sumEstimatedHours(tasks);
+  const estimatedTotal = (data as { estimated_hours?: number | null }).estimated_hours ?? sumEstimatedHours(tasks);
   const avgPriority =
     tasks.length > 0 ? tasks.reduce((s, t) => s + (t.priority_stars ?? 1), 0) / tasks.length : 1;
 
@@ -294,7 +294,7 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
         </div>
 
         {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="scrollbar-cosmic" style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: statusStyle.bg, color: statusStyle.color }}>
               {statusStyle.text}
@@ -507,7 +507,7 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
           </CollapsibleSection>
         </div>
 
-        {/* Sticky footer */}
+        {/* Sticky footer: Zoom In, Add progress, Assign Team — w jednej linii */}
         <div
           style={{
             flexShrink: 0,
@@ -519,14 +519,40 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
             borderTop: `1px solid ${cardTheme.border.replace('0.3', '0.2')}`,
             display: 'flex',
             gap: 12,
-            flexWrap: 'wrap',
+            flexWrap: 'nowrap',
+            alignItems: 'center',
+            overflowX: 'auto',
           }}
         >
+          {onZoomIn && (
+            <button
+              onClick={() => { onClose(); onZoomIn(); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexShrink: 0,
+                gap: 8,
+                padding: '12px 20px',
+                background: 'linear-gradient(135deg, rgba(0, 217, 255, 0.2), rgba(0, 188, 212, 0.2))',
+                border: `1px solid ${cardTheme.border}`,
+                borderRadius: 10,
+                color: cardTheme.header,
+                fontSize: 14,
+                fontWeight: 600,
+                fontFamily: 'Orbitron, sans-serif',
+                cursor: 'pointer',
+              }}
+            >
+              <Telescope size={18} />
+              Zoom In
+            </button>
+          )}
           <button
             onClick={() => setShowAddProgress(true)}
             style={{
               display: 'flex',
               alignItems: 'center',
+              flexShrink: 0,
               gap: 8,
               padding: '12px 20px',
               background: `${cardTheme.accent}`,
@@ -547,6 +573,7 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
               style={{
                 display: 'flex',
                 alignItems: 'center',
+                flexShrink: 0,
                 gap: 8,
                 padding: '12px 20px',
                 background: cardTheme.accent,
@@ -560,28 +587,6 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
             >
               <UserPlus size={18} />
               Assign Team
-            </button>
-          )}
-          {onZoomIn && (
-            <button
-              onClick={() => { onClose(); onZoomIn(); }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '12px 20px',
-                background: 'linear-gradient(135deg, rgba(0, 217, 255, 0.2), rgba(0, 188, 212, 0.2))',
-                border: `1px solid ${cardTheme.border}`,
-                borderRadius: 10,
-                color: cardTheme.header,
-                fontSize: 14,
-                fontWeight: 600,
-                fontFamily: 'Orbitron, sans-serif',
-                cursor: 'pointer',
-              }}
-            >
-              <Telescope size={18} />
-              Zoom In
             </button>
           )}
         </div>
@@ -602,6 +607,7 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
           onClick={() => setShowDescPopup(false)}
         >
           <div
+            className="scrollbar-cosmic"
             style={{
               maxWidth: 400,
               maxHeight: '80vh',

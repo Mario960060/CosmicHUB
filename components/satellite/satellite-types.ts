@@ -10,6 +10,7 @@ export const SATELLITE_TYPES = [
   { type: 'metrics' as const, name: 'Metrics', icon: '📊', color: '#f59e0b', description: 'Track KPIs and data' },
   { type: 'ideas' as const, name: 'Ideas', icon: '💡', color: '#a855f7', description: 'Parking lot for unformed thoughts' },
   { type: 'repo' as const, name: 'Repo/Dev', icon: '🔧', color: '#64748b', description: 'Git, code workspace (coming soon)' },
+  { type: 'canvas' as const, name: 'Canvas', icon: '📋', color: '#f97316', description: 'Infinite whiteboard — blocks and connections' },
 ] as const;
 
 export type SatelliteType = (typeof SATELLITE_TYPES)[number]['type'];
@@ -24,4 +25,5 @@ export const SATELLITE_TYPE_TO_CSS: Record<SatelliteType, string> = {
   metrics: 'astro-gauge',
   ideas: 'nebula-spark',
   repo: 'core-module',
+  canvas: 'nexus-drone',
 };

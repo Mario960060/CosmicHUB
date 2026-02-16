@@ -8,10 +8,16 @@ import { IssuesContent } from './types/IssuesContent';
 import { DocumentsContent } from './types/DocumentsContent';
 import { MetricsContent } from './types/MetricsContent';
 import { IdeasContent } from './types/IdeasContent';
+import { CanvasContent } from './types/CanvasContent';
 import { useSubtask } from '@/lib/workstation/queries';
 import { useUpdateTaskStatus } from '@/lib/workstation/mutations';
+import { useDependencies } from '@/lib/pm/queries';
+import { useProjectMembers, useModuleMembers, useTaskMembers } from '@/lib/pm/queries';
+import { useUpdateSubtask } from '@/lib/pm/mutations';
 import { ManageDependenciesDialog } from '@/components/ManageDependenciesDialog';
+import type { ActivityEntry } from '@/lib/satellite/save-satellite-data';
 import { useState } from 'react';
+import { useAuth } from '@/hooks/use-auth';
 import type { SatelliteType } from './satellite-types';
 
 import type { SubtaskWithDetails } from '@/lib/workstation/queries';
@@ -24,13 +30,34 @@ interface SatelliteDetailPanelProps {
 }
 
 export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isModal = false }: SatelliteDetailPanelProps) {
+  const { user } = useAuth();
   const { data: fetchedSubtask, isLoading } = useSubtask(subtaskId);
   // Use initialSubtask when available (from list) - avoids duplicate fetch and RLS issues
   const subtask = initialSubtask?.id === subtaskId ? initialSubtask : fetchedSubtask;
   const updateStatus = useUpdateTaskStatus();
+  const updateSubtask = useUpdateSubtask();
   const [showDependenciesDialog, setShowDependenciesDialog] = useState(false);
 
+  const projectId =
+    (subtask as { project_id?: string })?.project_id ??
+    (subtask as { parent_task?: { module?: { project?: { id?: string } } } })?.parent_task?.module?.project?.id ??
+    null;
+  const taskId = (subtask as { parent_id?: string })?.parent_id ?? null;
+  const moduleId =
+    (subtask as { module_id?: string })?.module_id ??
+    (subtask as { parent_task?: { module?: { id?: string } } })?.parent_task?.module?.id ??
+    null;
+  const { data: dependencies } = useDependencies(subtaskId);
+  const { data: projectMembers } = useProjectMembers(projectId);
+  const { data: moduleMembers } = useModuleMembers(moduleId);
+  const { data: taskMembers } = useTaskMembers(taskId);
   const workLogsTotal = subtask?.work_logs?.reduce((s, w) => s + (w.hours_spent || 0), 0) ?? 0;
+  const canDeleteContent = !!user && (
+    user.role === 'admin' ||
+    !!projectMembers?.some((m: { user_id: string; role: string }) => m.user_id === user?.id && m.role === 'manager') ||
+    !!(taskId && taskMembers?.some((m: { user_id: string; role: string }) => m.user_id === user?.id && m.role === 'responsible')) ||
+    (subtask as { created_by?: string })?.created_by === user?.id
+  );
 
   if (!subtaskId) {
     return (
@@ -87,6 +114,21 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
     await updateStatus.mutateAsync({ subtaskId: subtask.id, status: newStatus as any });
   };
 
+  const handleAssignedChange = async (userId: string | null) => {
+    await updateSubtask.mutateAsync({
+      subtaskId: subtask.id,
+      updates: { assigned_to: userId },
+    });
+  };
+
+  const handleNameChange = async (newName: string) => {
+    if (newName.trim() === subtask.name) return;
+    await updateSubtask.mutateAsync({
+      subtaskId: subtask.id,
+      updates: { name: newName.trim() },
+    });
+  };
+
   const renderContent = () => {
     switch (satelliteType as SatelliteType) {
       case 'notes':
@@ -108,6 +150,9 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
           <QuestionsContent
             subtaskId={subtask.id}
             satelliteData={(subtask as { satellite_data?: Record<string, unknown> }).satellite_data ?? {}}
+            subtaskName={subtask.name}
+            projectMembers={projectMembers ?? []}
+            canDelete={canDeleteContent}
           />
         );
       case 'issues':
@@ -115,6 +160,14 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
           <IssuesContent
             subtaskId={subtask.id}
             satelliteData={(subtask as { satellite_data?: Record<string, unknown> }).satellite_data ?? {}}
+            subtaskName={subtask.name}
+            assignablePeople={
+              taskId ? (taskMembers ?? []) : moduleId ? (moduleMembers ?? []) : (projectMembers ?? [])
+            }
+            createdBy={(subtask as { created_by?: string })?.created_by}
+            isAdmin={user?.role === 'admin'}
+            isProjectManager={!!projectMembers?.some((m: { user_id: string; role: string }) => m.user_id === user?.id && m.role === 'manager')}
+            isTaskResponsible={!!(taskId && taskMembers?.some((m: { user_id: string; role: string }) => m.user_id === user?.id && m.role === 'responsible'))}
           />
         );
       case 'documents':
@@ -138,6 +191,19 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
             satelliteData={(subtask as { satellite_data?: Record<string, unknown> }).satellite_data ?? {}}
             moduleId={(subtask as { parent_task?: { module?: { id?: string } } }).parent_task?.module?.id}
             projectId={(subtask as { parent_task?: { module?: { project?: { id?: string } } } }).parent_task?.module?.project?.id}
+            subtaskName={subtask.name}
+            projectMembers={projectMembers ?? []}
+          />
+        );
+      case 'canvas':
+        return (
+          <CanvasContent
+            subtaskId={subtask.id}
+            satelliteData={(subtask as { satellite_data?: Record<string, unknown> }).satellite_data ?? {}}
+            assignablePeople={
+              taskId ? (taskMembers ?? []) : moduleId ? (moduleMembers ?? []) : (projectMembers ?? [])
+            }
+            canDeleteContent={canDeleteContent}
           />
         );
       case 'repo':
@@ -192,14 +258,27 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
         satelliteType={satelliteType}
         status={subtask.status}
         assignedUser={subtask.assigned_user}
-        estimatedHours={subtask.estimated_hours}
+        assignedToId={subtask.assigned_to}
+        projectMembers={projectMembers ?? []}
         dueDate={subtask.due_date}
-        dependencyCount={0}
+        dependencyCount={dependencies?.length ?? 0}
+        hideHeaderAssign={satelliteType === 'issues' || satelliteType === 'canvas'}
+        activity={((subtask as { satellite_data?: { activity?: ActivityEntry[] } }).satellite_data?.activity as ActivityEntry[]) ?? []}
+        onNameChange={handleNameChange}
         onStatusChange={handleStatusChange}
+        onAssignedChange={handleAssignedChange}
         onDependenciesClick={() => setShowDependenciesDialog(true)}
-        workLogsTotalHours={workLogsTotal}
       />
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>{renderContent()}</div>
+      <div
+        className={satelliteType === 'canvas' ? undefined : 'scrollbar-cosmic'}
+        style={{
+          flex: 1,
+          overflow: satelliteType === 'canvas' ? 'hidden' : 'auto',
+          padding: satelliteType === 'canvas' ? 0 : 16,
+        }}
+      >
+        {renderContent()}
+      </div>
 
       {showDependenciesDialog && (
         <ManageDependenciesDialog

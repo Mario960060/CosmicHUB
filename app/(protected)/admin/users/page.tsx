@@ -7,8 +7,10 @@ import { useUsers } from '@/lib/admin/queries';
 import { useUpdateUser, useDeactivateUser } from '@/lib/admin/mutations';
 import { Search, Edit2, UserX, Mail, Shield, User, X, Save, Users } from 'lucide-react';
 import { isUserOnline } from '@/lib/utils';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 export default function UsersPage() {
+  const { confirm, ConfirmDialog: ConfirmDialogEl } = useConfirm();
   const { data: users, isLoading } = useUsers();
   const updateUser = useUpdateUser();
   const deactivateUser = useDeactivateUser();
@@ -341,8 +343,15 @@ export default function UsersPage() {
 
                         {/* Deactivate Button */}
                         <button
-                          onClick={() => {
-                            if (confirm(`Deactivate ${user.full_name}?`)) {
+                          onClick={async () => {
+                            const confirmed = await confirm({
+                              title: 'Dezaktywacja użytkownika',
+                              message: `Czy na pewno chcesz dezaktywować użytkownika ${user.full_name}?`,
+                              confirmLabel: 'Dezaktywuj',
+                              cancelLabel: 'Anuluj',
+                              variant: 'danger',
+                            });
+                            if (confirmed) {
                               deactivateUser.mutate(user.id);
                             }
                           }}
@@ -415,6 +424,7 @@ export default function UsersPage() {
           }}
         >
           <div
+            className="scrollbar-cosmic"
             onClick={(e) => e.stopPropagation()}
             style={{
               width: '100%',
@@ -766,6 +776,7 @@ export default function UsersPage() {
           color: #00d9ff;
         }
       `}</style>
+      {ConfirmDialogEl}
     </div>
   );
 }

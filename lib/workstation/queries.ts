@@ -282,6 +282,79 @@ export function useMyActiveTasks(userId: string | undefined) {
   });
 }
 
+// Minitask with relations (for Workstation - Sub-tasks tab)
+export interface MinitaskWithDetails {
+  id: string;
+  task_id: string | null;
+  module_id: string | null;
+  project_id: string | null;
+  name: string;
+  description?: string | null;
+  status: string;
+  priority_stars: number;
+  assigned_to: string | null;
+  due_date: string | null;
+  progress_percent: number | null;
+  created_at: string;
+  task?: { id: string; name: string; module?: { id: string; name: string; project?: { id: string; name: string } } } | null;
+  module?: { id: string; name: string; project?: { id: string; name: string } } | null;
+  project?: { id: string; name: string } | null;
+  subtasks?: (Subtask & { work_logs?: { hours_spent: number }[] })[];
+}
+
+// Fetch all minitasks user has access to (for Workstation - Sub-tasks tab)
+export function useWorkstationMinitasks() {
+  return useQuery({
+    queryKey: ['workstation-minitasks'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('minitasks')
+        .select(`
+          *,
+          task:tasks (
+            id,
+            name,
+            module:modules (
+              id,
+              name,
+              project:projects (
+                id,
+                name
+              )
+            )
+          ),
+          module:modules (
+            id,
+            name,
+            project:projects (
+              id,
+              name
+            )
+          ),
+          project:projects (
+            id,
+            name
+          ),
+          subtasks (
+            id,
+            name,
+            status,
+            satellite_type,
+            work_logs (hours_spent)
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching workstation minitasks:', error);
+        throw error;
+      }
+      return data as MinitaskWithDetails[];
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
 // Fetch available tasks (not assigned, not claimed or claim expired)
 export function useAvailableTasks() {
   return useQuery({

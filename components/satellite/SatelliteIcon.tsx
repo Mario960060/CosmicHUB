@@ -11,7 +11,8 @@ export type SpacecraftType =
   | 'pulse-beacon'
   | 'astro-gauge'
   | 'nebula-spark'
-  | 'core-module';
+  | 'core-module'
+  | 'nexus-drone';
 
 interface SatelliteIconProps {
   /** Spacecraft type (CSS class) — use SATELLITE_TYPE_TO_CSS[satelliteType] for satellite_type */
@@ -126,6 +127,31 @@ const SATELLITE_STRUCTURES: Record<SpacecraftType, React.ReactNode> = {
       <div className="cm-dock-b" />
     </>
   ),
+  'nexus-drone': (
+    <>
+      <div className="nd-data" />
+      <div className="nd-data" />
+      <div className="nd-data" />
+      <div className="nd-conn nd-conn-top" />
+      <div className="nd-conn nd-conn-right" />
+      <div className="nd-conn nd-conn-bottom" />
+      <div className="nd-conn nd-conn-left" />
+      <div className="nd-node nd-node-tr" />
+      <div className="nd-node nd-node-tl" />
+      <div className="nd-node nd-node-br" />
+      <div className="nd-node nd-node-bl" />
+      <div className="nd-arm nd-arm-tr" />
+      <div className="nd-arm nd-arm-tl" />
+      <div className="nd-arm nd-arm-br" />
+      <div className="nd-arm nd-arm-bl" />
+      <div className="nd-wing-t" />
+      <div className="nd-wing-b" />
+      <div className="nd-holo-ring2" />
+      <div className="nd-holo-ring" />
+      <div className="nd-core" />
+      <div className="nd-lens" />
+    </>
+  ),
 };
 
 export function SatelliteIcon({ type, size = 'md', className = '' }: SatelliteIconProps) {
@@ -136,6 +162,7 @@ export function SatelliteIcon({ type, size = 'md', className = '' }: SatelliteIc
     <div
       className={className}
       style={{
+        position: 'relative',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',

@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from '@/hooks/use-auth';
+import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
+import { toast } from 'sonner';
+import { ensureAbsoluteUrl } from '@/lib/utils';
 
 interface NotesContentProps {
   subtaskId: string;
@@ -15,6 +18,8 @@ const initialData = {
 };
 
 export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
+  const { user } = useAuth();
+  const invalidate = useInvalidateSatelliteQueries();
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [content, setContent] = useState(
     (satelliteData.content as string) ?? initialData.content
@@ -22,27 +27,37 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
   const [links, setLinks] = useState(initialData.links);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const lastSavedContentRef = useRef<string>('');
 
   useEffect(() => {
     const c = typeof satelliteData.content === 'string' ? satelliteData.content : '';
     const l = Array.isArray(satelliteData.links) ? (satelliteData.links as typeof initialData.links) : [];
     setContent(c);
     setLinks(l);
+    lastSavedContentRef.current = c;
   }, [subtaskId, satelliteData.content, satelliteData.links]);
 
   const save = useCallback(async () => {
+    const contentChanged = content !== lastSavedContentRef.current;
     setSaving(true);
-    const supabase = createClient();
-    await supabase
-      .from('subtasks')
-      .update({
-        satellite_data: { content, links, sections: [] },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', subtaskId);
+    const { error } = await saveSatelliteData(
+      subtaskId,
+      { content, links, sections: [] },
+      {
+        activityEntry: user && contentChanged
+          ? { user_id: user.id, action: 'updated_note', detail: '', actor_name: user.full_name }
+          : undefined,
+        onSuccess: () => invalidate(subtaskId),
+      }
+    );
     setSaving(false);
+    if (error) {
+      toast.error('Failed to save');
+      return;
+    }
+    lastSavedContentRef.current = content;
     setLastSaved(new Date());
-  }, [subtaskId, content, links]);
+  }, [subtaskId, content, links, user, invalidate]);
 
   useEffect(() => {
     const t = setTimeout(save, 2000);
@@ -142,7 +157,7 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
             {links.map((link) => (
               <a
                 key={link.id}
-                href={link.url}
+                href={ensureAbsoluteUrl(link.url)}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{

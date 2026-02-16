@@ -9,6 +9,7 @@ import {
   BarChart2,
   Lightbulb,
   GitBranch,
+  LayoutGrid,
 } from 'lucide-react';
 import { SATELLITE_TYPES } from './satellite-types';
 import type { SatelliteType } from './satellite-types';
@@ -22,6 +23,7 @@ const SATELLITE_ICONS: Record<SatelliteType, React.ComponentType<{ size?: number
   metrics: BarChart2,
   ideas: Lightbulb,
   repo: GitBranch,
+  canvas: LayoutGrid,
 };
 
 interface SubtaskTypeIconProps {

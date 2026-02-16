@@ -4,7 +4,10 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { createClient } from '@/lib/supabase/client';
 import { formatRelativeTime } from '@/lib/utils';
-import { MessageCircle, Plus } from 'lucide-react';
+import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
+import { toast } from 'sonner';
+import { CosmicDropdown } from '../CosmicDropdown';
+import { MessageCircle, Plus, Trash2 } from 'lucide-react';
 
 interface Question {
   id: string;
@@ -20,9 +23,17 @@ interface Question {
   comments: { id: string; user_id: string; text: string; created_at: string }[];
 }
 
+interface ProjectMember {
+  user_id: string;
+  user?: { id: string; full_name: string };
+}
+
 interface QuestionsContentProps {
   subtaskId: string;
   satelliteData: Record<string, unknown>;
+  subtaskName?: string;
+  projectMembers?: ProjectMember[];
+  canDelete?: boolean;
 }
 
 function getQuestions(data: Record<string, unknown>): Question[] {
@@ -43,8 +54,9 @@ function getQuestions(data: Record<string, unknown>): Question[] {
   }));
 }
 
-export function QuestionsContent({ subtaskId, satelliteData }: QuestionsContentProps) {
+export function QuestionsContent({ subtaskId, satelliteData, subtaskName = '', projectMembers = [], canDelete = false }: QuestionsContentProps) {
   const { user } = useAuth();
+  const invalidate = useInvalidateSatelliteQueries();
   const [questions, setQuestions] = useState<Question[]>(() => getQuestions(satelliteData));
   const [filter, setFilter] = useState<'all' | 'open' | 'answered'>('all');
   const [newText, setNewText] = useState('');
@@ -54,63 +66,99 @@ export function QuestionsContent({ subtaskId, satelliteData }: QuestionsContentP
 
   useEffect(() => {
     setQuestions(getQuestions(satelliteData));
-  }, [subtaskId]);
+  }, [subtaskId, satelliteData]);
 
-  const save = async (next: Question[]) => {
+  const save = async (
+    next: Question[],
+    activityEntry?: { user_id: string; action: string; detail: string; actor_name?: string }
+  ) => {
     setSaving(true);
-    const supabase = createClient();
-    await supabase
-      .from('subtasks')
-      .update({
-        satellite_data: { questions: next },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', subtaskId);
+    const { error } = await saveSatelliteData(subtaskId, { questions: next }, {
+      activityEntry,
+      onSuccess: () => invalidate(subtaskId),
+    });
     setSaving(false);
+    if (error) {
+      toast.error('Failed to save');
+      return;
+    }
     setQuestions(next);
   };
 
   const addQuestion = () => {
     if (!newText.trim() || !user) return;
+    const text = newText.trim();
     const q: Question = {
       id: crypto.randomUUID(),
-      text: newText.trim(),
+      text,
       status: 'open',
       asked_by: user.id,
       created_at: new Date().toISOString(),
       comments: [],
     };
-    const next = [...questions, q];
-    save(next);
+    const next = [q, ...questions];
+    save(next, { user_id: user.id, action: 'added_question', detail: text, actor_name: user.full_name });
     setNewText('');
   };
 
   const answerQuestion = (id: string) => {
     const answer = answerText[id]?.trim();
     if (!answer || !user) return;
-    const next = questions.map((q) =>
-      q.id === id
+    const q = questions.find((x) => x.id === id);
+    const next = questions.map((p) =>
+      p.id === id
         ? {
-            ...q,
+            ...p,
             status: 'answered' as const,
             answer,
             answered_by: user.id,
             answered_at: new Date().toISOString(),
           }
-        : q
+        : p
     );
-    save(next);
+    save(next, { user_id: user.id, action: 'answered_question', detail: q?.text ?? '' });
     setAnswerText((prev) => ({ ...prev, [id]: '' }));
     setExpandedId(null);
   };
 
   const reopenQuestion = (id: string) => {
-    const next = questions.map((q) =>
-      q.id === id
-        ? { ...q, status: 'open' as const, answer: null, answered_by: null, answered_at: null }
-        : q
+    const q = questions.find((x) => x.id === id);
+    const next = questions.map((p) =>
+      p.id === id
+        ? { ...p, status: 'open' as const, answer: null, answered_by: null, answered_at: null }
+        : p
     );
-    save(next);
+    save(next, { user_id: user!.id, action: 'reopened_question', detail: q?.text ?? '', actor_name: user!.full_name });
+  };
+
+  const dismissQuestion = (id: string) => {
+    if (!user) return;
+    const q = questions.find((x) => x.id === id);
+    const next = questions.map((p) =>
+      p.id === id ? { ...p, status: 'dismissed' as const } : p
+    );
+    save(next, { user_id: user.id, action: 'dismissed_question', detail: q?.text ?? '', actor_name: user.full_name });
+    setExpandedId(null);
+  };
+
+  const assignQuestion = async (id: string, userId: string | null) => {
+    const q = questions.find((x) => x.id === id);
+    const next = questions.map((p) =>
+      p.id === id ? { ...p, assigned_to: userId } : p
+    );
+    await save(next, { user_id: user!.id, action: 'assigned_question', detail: q?.text ?? '', actor_name: user!.full_name });
+    if (userId && q) {
+      const supabase = createClient();
+      await supabase.rpc('create_notification', {
+        p_user_id: userId,
+        p_type: 'question_assigned',
+        p_title: 'Question assigned',
+        p_message: `You were assigned to answer a question: "${q.text}"`,
+        p_related_id: subtaskId,
+        p_related_type: 'subtask',
+        p_actor_id: user!.id,
+      });
+    }
   };
 
   const filtered = questions.filter((q) => {
@@ -242,7 +290,25 @@ export function QuestionsContent({ subtaskId, satelliteData }: QuestionsContentP
                   {isAnswered ? '●' : '○'}
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '14px', color: '#fff', fontWeight: 500 }}>{q.text}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '14px', color: '#fff', fontWeight: 500 }}>{q.text}</span>
+                    {projectMembers.length > 0 && (
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <CosmicDropdown
+                          value={q.assigned_to ?? '__none__'}
+                          options={[
+                            { value: '__none__', label: 'Unassigned' },
+                            ...projectMembers.map((pm) => ({
+                              value: pm.user_id,
+                              label: pm.user?.full_name ?? 'Unknown',
+                            })),
+                          ]}
+                          onChange={(v) => assignQuestion(q.id, v === '__none__' ? null : v)}
+                          style={{ minWidth: 120 }}
+                        />
+                      </div>
+                    )}
+                  </div>
                   <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '4px' }}>
                     {formatRelativeTime(q.created_at)}
                     {q.status === 'answered' && q.answered_at && (
@@ -307,6 +373,44 @@ export function QuestionsContent({ subtaskId, satelliteData }: QuestionsContentP
                     >
                       Answer
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => dismissQuestion(q.id)}
+                      disabled={saving}
+                      style={{
+                        padding: '8px 16px',
+                        background: 'rgba(107, 114, 128, 0.2)',
+                        border: '1px solid rgba(107, 114, 128, 0.4)',
+                        borderRadius: '6px',
+                        color: '#9ca3af',
+                        fontSize: '13px',
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                    {canDelete && (
+                      <button
+                        type="button"
+                        onClick={() => deleteQuestion(q.id)}
+                        disabled={saving}
+                        style={{
+                          padding: '8px 16px',
+                          background: 'rgba(239, 68, 68, 0.2)',
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          borderRadius: '6px',
+                          color: '#ef4444',
+                          fontSize: '13px',
+                          cursor: saving ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        <Trash2 size={14} />
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -314,7 +418,7 @@ export function QuestionsContent({ subtaskId, satelliteData }: QuestionsContentP
               {isExpanded && isAnswered && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(0, 217, 255, 0.15)' }}
+                  style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(0, 217, 255, 0.15)', display: 'flex', gap: '8px' }}
                 >
                   <button
                     type="button"
@@ -332,6 +436,28 @@ export function QuestionsContent({ subtaskId, satelliteData }: QuestionsContentP
                   >
                     Reopen
                   </button>
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={() => deleteQuestion(q.id)}
+                      disabled={saving}
+                      style={{
+                        padding: '6px 12px',
+                        background: 'rgba(239, 68, 68, 0.2)',
+                        border: '1px solid rgba(239, 68, 68, 0.4)',
+                        borderRadius: '6px',
+                        color: '#ef4444',
+                        fontSize: '12px',
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      Delete
+                    </button>
+                  )}
                 </div>
               )}
             </div>

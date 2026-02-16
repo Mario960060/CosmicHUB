@@ -7,8 +7,10 @@ import { useAuth } from '@/hooks/use-auth';
 import { useInvites } from '@/lib/admin/queries';
 import { useCreateInvite, useCancelInvite } from '@/lib/admin/mutations';
 import { Plus, Copy, X, Mail, Shield, Clock, Send, Check } from 'lucide-react';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 export default function InvitesPage() {
+  const { confirm, ConfirmDialog: ConfirmDialogEl } = useConfirm();
   const { user } = useAuth();
   const { data: invites } = useInvites();
   const createInvite = useCreateInvite();
@@ -260,8 +262,15 @@ export default function InvitesPage() {
 
                       {/* Cancel Button */}
                       <button
-                        onClick={() => {
-                          if (confirm('Cancel this invite?')) {
+                        onClick={async () => {
+                          const confirmed = await confirm({
+                            title: 'Anulowanie zaproszenia',
+                            message: 'Czy na pewno chcesz anulować to zaproszenie?',
+                            confirmLabel: 'Anuluj zaproszenie',
+                            cancelLabel: 'Nie',
+                            variant: 'danger',
+                          });
+                          if (confirmed) {
                             cancelInvite.mutate(invite.id);
                           }
                         }}
@@ -372,6 +381,7 @@ export default function InvitesPage() {
               maxHeight: '90vh',
               overflowY: 'auto',
             }}
+            className="scrollbar-cosmic"
           >
             {/* Modal Header */}
             <div style={{
@@ -706,6 +716,7 @@ export default function InvitesPage() {
           color: #00d9ff;
         }
       `}</style>
+      {ConfirmDialogEl}
     </div>
   );
 }

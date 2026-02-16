@@ -1,0 +1,140 @@
+-- ============================================
+-- COSMIC PROJECT HUB - Minitasks assignable to project (Sun level)
+-- Migration 51: Add project_id to minitasks (minitask can belong to task OR module OR project)
+-- ============================================
+
+-- Add project_id
+ALTER TABLE minitasks ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
+
+-- Constraint: exactly one of task_id, module_id, or project_id
+ALTER TABLE minitasks DROP CONSTRAINT IF EXISTS minitask_one_parent;
+ALTER TABLE minitasks ADD CONSTRAINT minitask_one_parent CHECK (
+  (task_id IS NOT NULL)::int + (module_id IS NOT NULL)::int + (project_id IS NOT NULL)::int = 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_minitasks_project ON minitasks(project_id) WHERE project_id IS NOT NULL;
+
+-- ============================================
+-- RLS - Update minitask access for project_id
+-- ============================================
+
+CREATE OR REPLACE FUNCTION user_has_minitask_access(m minitasks)
+RETURNS boolean AS $$
+BEGIN
+  RETURN (
+    (m.task_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM tasks t
+      INNER JOIN modules mod ON mod.id = t.module_id
+      INNER JOIN project_members pm ON pm.project_id = mod.project_id
+      WHERE t.id = m.task_id AND pm.user_id = auth.uid()
+    ))
+    OR
+    (m.module_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM modules mod
+      INNER JOIN project_members pm ON pm.project_id = mod.project_id
+      WHERE mod.id = m.module_id AND pm.user_id = auth.uid()
+    ))
+    OR
+    (m.project_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM project_members pm
+      WHERE pm.project_id = m.project_id AND pm.user_id = auth.uid()
+    ))
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION user_pm_has_minitask_access(m minitasks)
+RETURNS boolean AS $$
+BEGIN
+  RETURN (
+    (m.task_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM tasks t
+      INNER JOIN modules mod ON mod.id = t.module_id
+      INNER JOIN project_members pm ON pm.project_id = mod.project_id
+      WHERE t.id = m.task_id AND pm.user_id = auth.uid() AND pm.role = 'manager'
+    ))
+    OR
+    (m.module_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM modules mod
+      INNER JOIN project_members pm ON pm.project_id = mod.project_id
+      WHERE mod.id = m.module_id AND pm.user_id = auth.uid() AND pm.role = 'manager'
+    ))
+    OR
+    (m.project_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM project_members pm
+      WHERE pm.project_id = m.project_id AND pm.user_id = auth.uid() AND pm.role = 'manager'
+    ))
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+-- ============================================
+-- RLS - Update subtask access for minitask (task_id OR module_id OR project_id)
+-- project_id for minitask: join pm via COALESCE(m.project_id, mt.project_id)
+-- ============================================
+
+CREATE OR REPLACE FUNCTION user_has_subtask_access(s subtasks)
+RETURNS boolean AS $$
+BEGIN
+  RETURN (
+    (s.parent_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM tasks t
+      INNER JOIN modules m ON m.id = t.module_id
+      INNER JOIN project_members pm ON pm.project_id = m.project_id
+      WHERE t.id = s.parent_id AND pm.user_id = auth.uid()
+    ))
+    OR
+    (s.module_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM modules m
+      INNER JOIN project_members pm ON pm.project_id = m.project_id
+      WHERE m.id = s.module_id AND pm.user_id = auth.uid()
+    ))
+    OR
+    (s.project_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM project_members pm
+      WHERE pm.project_id = s.project_id AND pm.user_id = auth.uid()
+    ))
+    OR
+    (s.minitask_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM minitasks mt
+      LEFT JOIN tasks t ON t.id = mt.task_id
+      LEFT JOIN modules m ON m.id = COALESCE(t.module_id, mt.module_id)
+      INNER JOIN project_members pm ON pm.project_id = COALESCE(m.project_id, mt.project_id)
+      WHERE mt.id = s.minitask_id AND pm.user_id = auth.uid()
+    ))
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION user_pm_has_subtask_access(s subtasks)
+RETURNS boolean AS $$
+BEGIN
+  RETURN (
+    (s.parent_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM tasks t
+      INNER JOIN modules m ON m.id = t.module_id
+      INNER JOIN project_members pm ON pm.project_id = m.project_id
+      WHERE t.id = s.parent_id AND pm.user_id = auth.uid() AND pm.role = 'manager'
+    ))
+    OR
+    (s.module_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM modules m
+      INNER JOIN project_members pm ON pm.project_id = m.project_id
+      WHERE m.id = s.module_id AND pm.user_id = auth.uid() AND pm.role = 'manager'
+    ))
+    OR
+    (s.project_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM project_members pm
+      WHERE pm.project_id = s.project_id AND pm.user_id = auth.uid() AND pm.role = 'manager'
+    ))
+    OR
+    (s.minitask_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM minitasks mt
+      LEFT JOIN tasks t ON t.id = mt.task_id
+      LEFT JOIN modules m ON m.id = COALESCE(t.module_id, mt.module_id)
+      INNER JOIN project_members pm ON pm.project_id = COALESCE(m.project_id, mt.project_id)
+      WHERE mt.id = s.minitask_id AND pm.user_id = auth.uid() AND pm.role = 'manager'
+    ))
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;

@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 
 interface AddProgressDialogProps {
   open: boolean;
-  entityType: 'task' | 'module';
+  entityType: 'task' | 'module' | 'minitask';
   entityId: string;
   entityName?: string;
   onClose: () => void;
@@ -55,6 +55,18 @@ export function AddProgressDialog({
             setTargetSubtaskId(list[0]?.id ?? null);
             setLoading(false);
           });
+      } else if (entityType === 'minitask') {
+        supabase
+          .from('subtasks')
+          .select('id')
+          .eq('minitask_id', entityId)
+          .order('created_at', { ascending: true })
+          .then(({ data }) => {
+            const list = (data || []) as { id: string }[];
+            setSubtasksForProgress(list);
+            setTargetSubtaskId(list[0]?.id ?? null);
+            setLoading(false);
+          });
       } else {
         supabase
           .from('tasks')
@@ -86,6 +98,27 @@ export function AddProgressDialog({
         .from('subtasks')
         .insert({
           parent_id: entityId,
+          name: 'Postęp',
+          status: 'in_progress',
+          created_by: user!.id,
+        })
+        .select('id')
+        .single();
+      if (error) {
+        toast.error('Nie udało się utworzyć subtaska');
+        return null;
+      }
+      subtaskId = newSubtask.id;
+      setTargetSubtaskId(subtaskId);
+      setSubtasksForProgress((prev) => [...prev, { id: subtaskId! }]);
+      return subtaskId;
+    }
+
+    if (!subtaskId && entityType === 'minitask') {
+      const { data: newSubtask, error } = await supabase
+        .from('subtasks')
+        .insert({
+          minitask_id: entityId,
           name: 'Postęp',
           status: 'in_progress',
           created_by: user!.id,
@@ -171,6 +204,8 @@ export function AddProgressDialog({
       const supabase = createClient();
       if (entityType === 'task') {
         await supabase.from('tasks').update({ progress_percent: percent }).eq('id', entityId);
+      } else if (entityType === 'minitask') {
+        await supabase.from('minitasks').update({ progress_percent: percent }).eq('id', entityId);
       } else {
         await supabase.from('modules').update({ progress_percent: percent }).eq('id', entityId);
       }
@@ -181,6 +216,8 @@ export function AddProgressDialog({
     queryClient.invalidateQueries({ queryKey: ['galactic-data'] });
     if (entityType === 'module') {
       queryClient.invalidateQueries({ queryKey: ['planet-details', entityId] });
+    } else if (entityType === 'minitask') {
+      queryClient.invalidateQueries({ queryKey: ['asteroid-details', entityId] });
     } else {
       queryClient.invalidateQueries({ queryKey: ['moon-details', entityId] });
     }
@@ -285,7 +322,7 @@ export function AddProgressDialog({
             Loading...
           </div>
         ) : (
-          <form onSubmit={handleSubmit} style={{ padding: '28px 32px 32px', overflowY: 'auto' }}>
+          <form onSubmit={handleSubmit} className="scrollbar-cosmic" style={{ padding: '28px 32px 32px', overflowY: 'auto' }}>
             <div style={{ marginBottom: '22px' }}>
               <label style={{
                 display: 'block',

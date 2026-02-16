@@ -8,13 +8,24 @@ import { SatelliteIcon, satelliteTypeToSpacecraft } from '@/components/satellite
 import { SATELLITE_TYPES, type SatelliteType } from '@/components/satellite/satellite-types';
 import { X } from 'lucide-react';
 import { z } from 'zod';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const subtaskSchema = z.object({
   name: z.string().min(2).max(200),
   description: z.string().max(1000).optional(),
-  estimatedHours: z.number().min(0).max(1000).optional(),
-  priorityStars: z.number().min(0.5).max(3.0),
 });
+
+const CREATOR_CONFIG: Record<SatelliteType, { title: string; placeholder: string }> = {
+  questions: { title: 'New Question', placeholder: 'e.g. What payment provider should we use?' },
+  issues: { title: 'New Issue', placeholder: 'e.g. Login fails on Safari 17+' },
+  notes: { title: 'New Note', placeholder: 'e.g. API Integration Research' },
+  documents: { title: 'New Document Hub', placeholder: 'e.g. Design Assets Collection' },
+  checklist: { title: 'New Checklist', placeholder: 'e.g. Deployment Steps' },
+  metrics: { title: 'New Metrics Board', placeholder: 'e.g. Conversion Rate Tracking' },
+  ideas: { title: 'New Ideas Board', placeholder: 'e.g. Feature Backlog Q2' },
+  repo: { title: 'New Dev Workspace', placeholder: 'e.g. Auth Module Code' },
+  canvas: { title: 'New Canvas', placeholder: 'e.g. User Flow Mapping, API Architecture' },
+};
 
 const SPACECRAFT_TO_SATELLITE: Record<string, SatelliteType> = {
   'sphere-drone': 'questions',
@@ -25,13 +36,21 @@ const SPACECRAFT_TO_SATELLITE: Record<string, SatelliteType> = {
   'astro-gauge': 'metrics',
   'nebula-spark': 'ideas',
   'core-module': 'repo',
+  'nexus-drone': 'canvas',
 };
 
+// Polymorphic parent: exactly one of parentTaskId, moduleId, projectId, minitaskId
 interface CreateSubtaskDialogProps {
   open: boolean;
   onClose: () => void;
-  parentTaskId: string;
-  parentTaskName: string;
+  parentTaskId?: string;
+  parentTaskName?: string;
+  moduleId?: string;
+  moduleName?: string;
+  projectId?: string;
+  projectName?: string;
+  minitaskId?: string;
+  minitaskName?: string;
   initialSatelliteType?: string;
   onSuccess?: (subtask: { id: string }) => void;
 }
@@ -41,9 +60,17 @@ export function CreateSubtaskDialog({
   onClose,
   parentTaskId,
   parentTaskName,
+  moduleId,
+  moduleName,
+  projectId,
+  projectName,
+  minitaskId,
+  minitaskName,
   initialSatelliteType,
   onSuccess,
 }: CreateSubtaskDialogProps) {
+  const { confirm, ConfirmDialog: ConfirmDialogEl } = useConfirm();
+  const parentName = parentTaskName ?? moduleName ?? projectName ?? minitaskName ?? 'Parent';
   const { user } = useAuth();
   const createSubtask = useCreateSubtask();
   const resolvedInitial = initialSatelliteType ? SPACECRAFT_TO_SATELLITE[initialSatelliteType] ?? 'notes' : 'notes';
@@ -51,13 +78,12 @@ export function CreateSubtaskDialog({
   const [satelliteType, setSatelliteType] = useState<SatelliteType>(resolvedInitial);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [estimatedHours, setEstimatedHours] = useState('');
-  const [priorityStars, setPriorityStars] = useState('1.0');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
   const [hoveredClose, setHoveredClose] = useState(false);
 
   const selectedInfo = SATELLITE_TYPES.find((s) => s.type === satelliteType);
+  const creatorConfig = CREATOR_CONFIG[satelliteType];
 
   const handleTypeSelect = (type: SatelliteType) => {
     setSatelliteType(type);
@@ -74,19 +100,17 @@ export function CreateSubtaskDialog({
     if (!user) return;
 
     try {
-      subtaskSchema.parse({
-        name,
-        description: description || undefined,
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
-        priorityStars: parseFloat(priorityStars),
-      });
+      subtaskSchema.parse({ name, description: description || undefined });
 
       const data = await createSubtask.mutateAsync({
-        parentId: parentTaskId,
+        ...(parentTaskId && { parentId: parentTaskId }),
+        ...(moduleId && { moduleId }),
+        ...(projectId && { projectId }),
+        ...(minitaskId && { minitaskId }),
         name,
         description: description || undefined,
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
-        priorityStars: parseFloat(priorityStars),
+        estimatedHours: undefined,
+        priorityStars: 1.0,
         createdBy: user.id,
         satelliteType,
         satelliteData: getInitialSatelliteData(satelliteType),
@@ -107,13 +131,27 @@ export function CreateSubtaskDialog({
     }
   };
 
+  const hasUnsavedChanges = step === 'form' && (name.trim() || description.trim());
+
+  const handleClose = async () => {
+    if (hasUnsavedChanges) {
+      const confirmed = await confirm({
+        title: 'Niezapisane zmiany',
+        message: 'Czy na pewno chcesz wyjść? Niezapisane zmiany zostaną utracone.',
+        confirmLabel: 'Wyjdź',
+        cancelLabel: 'Zostań',
+        variant: 'warning',
+      });
+      if (!confirmed) return;
+    }
+    resetAndClose();
+  };
+
   const resetAndClose = () => {
     setStep('type');
     setSatelliteType('notes');
     setName('');
     setDescription('');
-    setEstimatedHours('');
-    setPriorityStars('1.0');
     setErrors({});
     onClose();
   };
@@ -132,7 +170,7 @@ export function CreateSubtaskDialog({
 
   return (
     <div
-      onClick={onClose}
+      onClick={handleClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -151,6 +189,9 @@ export function CreateSubtaskDialog({
           position: 'relative',
           width: '100%',
           maxWidth: step === 'type' ? '560px' : '600px',
+          maxHeight: '90vh',
+          display: 'flex',
+          flexDirection: 'column',
           background: 'rgba(21, 27, 46, 0.95)',
           backdropFilter: 'blur(30px)',
           border: '1px solid rgba(0, 217, 255, 0.3)',
@@ -173,7 +214,7 @@ export function CreateSubtaskDialog({
             style={{
               fontSize: '24px',
               fontFamily: 'Orbitron, sans-serif',
-              color: '#00d9ff',
+              color: selectedInfo?.color ?? '#00d9ff',
               fontWeight: 'bold',
               margin: 0,
               display: 'flex',
@@ -186,10 +227,33 @@ export function CreateSubtaskDialog({
             ) : (
               selectedInfo && <SatelliteIcon type={satelliteTypeToSpacecraft(selectedInfo.type)} size="sm" />
             )}
-            {step === 'type' ? 'Create Subtask' : `Add ${selectedInfo?.name} to ${parentTaskName}`}
+            {step === 'type' ? 'Create Subtask' : creatorConfig?.title ?? `Add ${selectedInfo?.name}`}
           </h2>
-          <button
-            onClick={resetAndClose}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {step === 'form' && selectedInfo && (
+              <span
+                style={{
+                  padding: '4px 10px',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  background: `${selectedInfo.color}22`,
+                  border: `1px solid ${selectedInfo.color}66`,
+                  borderRadius: '8px',
+                  color: selectedInfo.color,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <SatelliteIcon type={satelliteTypeToSpacecraft(selectedInfo.type)} size="sm" />
+                {selectedInfo.name}
+              </span>
+            )}
+            <button
+            type="button"
+            onClick={handleClose}
             onMouseEnter={() => setHoveredClose(true)}
             onMouseLeave={() => setHoveredClose(false)}
             style={{
@@ -205,17 +269,18 @@ export function CreateSubtaskDialog({
               cursor: 'pointer',
               transition: 'all 0.2s ease',
             }}
-          >
-            <X size={18} />
-          </button>
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {step === 'type' ? (
-          <>
+          <div className="scrollbar-cosmic" style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0 }}>
             <SatelliteTypePicker onSelect={handleTypeSelect} selectedType={satelliteType} />
-          </>
+          </div>
         ) : (
-          <form onSubmit={handleSubmit} style={{ padding: '32px' }}>
+          <form onSubmit={handleSubmit} className="scrollbar-cosmic" style={{ padding: '32px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0 }}>
             <div style={{ marginBottom: '24px' }}>
               <label
                 style={{
@@ -226,13 +291,13 @@ export function CreateSubtaskDialog({
                   marginBottom: '8px',
                 }}
               >
-                Subtask Name <span style={{ color: '#ef4444' }}>*</span>
+                Name <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Review API endpoints"
+                placeholder={creatorConfig?.placeholder ?? 'e.g., Review API endpoints'}
                 required
                 style={{
                   width: '100%',
@@ -280,78 +345,6 @@ export function CreateSubtaskDialog({
                   fontFamily: 'inherit',
                 }}
               />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-              <div>
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#00d9ff',
-                    marginBottom: '8px',
-                  }}
-                >
-                  Estimated Hours
-                </label>
-                <input
-                  type="number"
-                  value={estimatedHours}
-                  onChange={(e) => setEstimatedHours(e.target.value)}
-                  placeholder="0"
-                  min="0"
-                  step="0.5"
-                  style={{
-                    width: '100%',
-                    padding: '12px 16px',
-                    background: 'rgba(0, 0, 0, 0.3)',
-                    border: '1px solid rgba(0, 217, 255, 0.3)',
-                    borderRadius: '12px',
-                    color: '#fff',
-                    fontSize: '14px',
-                    outline: 'none',
-                  }}
-                />
-              </div>
-              <div>
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#00d9ff',
-                    marginBottom: '8px',
-                  }}
-                >
-                  Priority Stars <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  type="number"
-                  value={priorityStars}
-                  onChange={(e) => setPriorityStars(e.target.value)}
-                  placeholder="1.0"
-                  min="0.5"
-                  max="3"
-                  step="0.5"
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '12px 16px',
-                    background: 'rgba(0, 0, 0, 0.3)',
-                    border: errors.priorityStars ? '1px solid #ef4444' : '1px solid rgba(0, 217, 255, 0.3)',
-                    borderRadius: '12px',
-                    color: '#fff',
-                    fontSize: '14px',
-                    outline: 'none',
-                  }}
-                />
-                {errors.priorityStars && (
-                  <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>
-                    {errors.priorityStars}
-                  </p>
-                )}
-              </div>
             </div>
 
             <div
@@ -411,6 +404,7 @@ export function CreateSubtaskDialog({
           </form>
         )}
       </div>
+      {ConfirmDialogEl}
     </div>
   );
 }
@@ -433,6 +427,8 @@ function getInitialSatelliteData(type: SatelliteType): Record<string, unknown> {
       return { ideas: [] };
     case 'repo':
       return {};
+    case 'canvas':
+      return { canvases: [] };
     default:
       return {};
   }

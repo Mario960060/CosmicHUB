@@ -158,7 +158,7 @@ export function TaskDetail({ taskId }: TaskDetailProps) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="scrollbar-cosmic flex-1 overflow-y-auto p-6 space-y-6">
         {/* Description */}
         {task.description && (
           <Card>

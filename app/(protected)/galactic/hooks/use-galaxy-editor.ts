@@ -5,9 +5,9 @@
 
 import { useState, useCallback } from 'react';
 
-export type CreatedEntity = { type: 'module' | 'task' | 'subtask'; id: string };
+export type CreatedEntity = { type: 'module' | 'task' | 'subtask' | 'minitask'; id: string };
 
-export type ConnectionSource = { entityId: string; entityType: 'module' | 'task' | 'subtask' };
+export type ConnectionSource = { entityId: string; entityType: 'module' | 'task' | 'subtask' | 'minitask' };
 
 export type GalaxyEditorState = {
   isEditMode: boolean;
@@ -44,7 +44,7 @@ export function useGalaxyEditor() {
     setState((prev) => ({ ...prev, selectedObjectId: id }));
   }, []);
 
-  const startConnectionMode = useCallback((entityId: string, entityType: 'module' | 'task' | 'subtask') => {
+  const startConnectionMode = useCallback((entityId: string, entityType: 'module' | 'task' | 'subtask' | 'minitask') => {
     setState((prev) => ({
       ...prev,
       connectionModeForSubtaskId: entityType === 'subtask' ? entityId : null,
