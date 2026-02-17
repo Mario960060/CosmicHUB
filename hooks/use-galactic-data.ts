@@ -43,7 +43,7 @@ export function useGalacticData(
 
         objects = transformProjectsToCanvas(projects || [], canvasWidth, canvasHeight);
       } else if (zoom === 'project' && projectId) {
-        // Fetch project data, modules, project-level subtasks, project-level minitasks, and galaxy positions
+        // Fetch project data, modules, project-level subtasks, project-level minitasks, module-level subtasks, and galaxy positions
         const [projectRes, modulesRes, projectSubtasksRes, projectMinitasksRes, positionsRes] = await Promise.all([
           supabase.from('projects').select('*').eq('id', projectId).single(),
           supabase.from('modules').select('*, tasks(*, subtasks(id, status, satellite_type, satellite_data), minitasks(*, subtasks(*)))').eq('project_id', projectId).order('order_index', { ascending: true }),
@@ -62,7 +62,32 @@ export function useGalacticData(
         const projectSubtasks = projectSubtasksRes.data || [];
         if (projectSubtasksRes.error) throw projectSubtasksRes.error;
 
-        const projectMinitasks = (projectMinitasksRes.data || []).filter((m: any) => m.project_id);
+        const projectMinitasks = (projectMinitasksRes.data || []).filter(
+          (m: any) => m.project_id && !m.module_id && !m.task_id
+        );
+
+        // Fetch module-level subtasks (subtasks with module_id, no parent_id, no minitask_id)
+        const moduleIds = modules.map((m: any) => m.id);
+        let moduleSubtasks: any[] = [];
+        let moduleMinitasks: any[] = [];
+        if (moduleIds.length > 0) {
+          const [moduleSubsRes, moduleMinsRes] = await Promise.all([
+            supabase
+              .from('subtasks')
+              .select('*')
+              .in('module_id', moduleIds)
+              .is('parent_id', null)
+              .is('minitask_id', null),
+            supabase
+              .from('minitasks')
+              .select('*, subtasks(*)')
+              .in('module_id', moduleIds)
+              .is('task_id', null)
+              .order('created_at', { ascending: true }),
+          ]);
+          moduleSubtasks = moduleSubsRes.data || [];
+          moduleMinitasks = moduleMinsRes.data || [];
+        }
 
         const rawMap = positionsRes.data ? positionsToMap(positionsRes.data as any) : undefined;
         const positionsMap = scalePositionsToCanvas(rawMap, canvasWidth, canvasHeight);
@@ -75,7 +100,9 @@ export function useGalacticData(
           project,
           positionsMap,
           projectSubtasks,
-          projectMinitasks
+          projectMinitasks,
+          moduleSubtasks,
+          moduleMinitasks
         );
       } else if (zoom === 'task' && taskId && moduleId && projectId) {
         // Task System view: Moon center + asteroids + satellites + portals to other tasks
@@ -185,9 +212,15 @@ export function useGalacticData(
           supabase.from('galaxy_positions').select('*').eq('project_id', projectId),
         ]);
 
-        const minitask = minitaskRes.data;
+        let minitask = minitaskRes.data;
         if (minitaskRes.error) throw minitaskRes.error;
         if (!minitask) throw new Error('Minitask not found');
+
+        // Ensure module_id is set when minitask has task_id (for Back navigation to task view)
+        if (minitask.task_id && !minitask.module_id) {
+          const { data: task } = await supabase.from('tasks').select('module_id').eq('id', minitask.task_id).single();
+          if (task?.module_id) minitask = { ...minitask, module_id: task.module_id };
+        }
 
         const subtasks = minitask.subtasks || [];
 

@@ -25,7 +25,7 @@ interface CanvasBlockProps {
   onPointerDown: (e: React.PointerEvent, target: 'body' | PortSide) => void;
   onDoubleClick: () => void;
   onTextChange: (text: string) => void;
-  onResizeStart: (e: React.PointerEvent) => void;
+  onResizeStart: (handle: string, e: React.PointerEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
@@ -102,6 +102,7 @@ export function CanvasBlock({
             marginBottom: 6,
             letterSpacing: 0.3,
             color: headerColor,
+            textAlign: block.textAlign ?? 'left',
           }}
         >
           {headerLine}
@@ -110,6 +111,7 @@ export function CanvasBlock({
 
       {editing ? (
         <textarea
+          className={`scrollbar-cosmic-${block.color}`}
           value={block.text}
           onChange={(e) => onTextChange(e.target.value)}
           onPointerDown={(e) => e.stopPropagation()}
@@ -124,13 +126,14 @@ export function CanvasBlock({
             borderRadius: 4,
             padding: 4,
             margin: -4,
-            minHeight: 40,
+            minHeight: 0,
             color: fontColors?.header ?? 'rgba(255,255,255,0.85)',
             fontSize,
             fontFamily: 'Exo 2, sans-serif',
             lineHeight: 1.5,
             outline: 'none',
             resize: 'none',
+            textAlign: block.textAlign ?? 'left',
           }}
         />
       ) : (
@@ -144,42 +147,58 @@ export function CanvasBlock({
             lineHeight: 1.5,
             color: bodyColor,
             whiteSpace: 'pre-wrap',
+            textAlign: block.textAlign ?? 'left',
           }}
         >
           {(headerLine ? bodyLines.join('\n') : block.text) || 'Type here...'}
         </div>
       )}
 
-      <div
-        className="canvas-block-resize"
-        style={{
+      {/* Resize handles: 4 corners + 4 edges (full edge length) */}
+      {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((handle) => {
+        const isCorner = ['nw', 'ne', 'sw', 'se'].includes(handle);
+        const size = isCorner ? 12 : 8;
+        const cursors: Record<string, string> = {
+          nw: 'nwse-resize', n: 'ns-resize', ne: 'nesw-resize', e: 'ew-resize',
+          se: 'nwse-resize', s: 'ns-resize', sw: 'nesw-resize', w: 'ew-resize',
+        };
+        const base: React.CSSProperties = {
           position: 'absolute',
-          bottom: -6,
-          right: -6,
-          width: 28,
-          height: 28,
-          cursor: 'se-resize',
+          cursor: cursors[handle],
           opacity: hovered || selected ? 1 : 0,
           transition: 'opacity 0.15s',
-        }}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          onResizeStart(e);
-        }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 6,
-            right: 6,
-            width: 10,
-            height: 10,
-            borderRight: '1.5px solid rgba(255,255,255,0.2)',
-            borderBottom: '1.5px solid rgba(255,255,255,0.2)',
-            borderRadius: '0 0 2px 0',
-          }}
-        />
-      </div>
+          zIndex: isCorner ? 12 : 11,
+        };
+        /* Block has padding: 14; right/bottom are relative to padding edge, so add pad to reach border */
+        const edge = 6;
+        const pad = 14;
+        const style: React.CSSProperties = isCorner
+          ? {
+              ...base,
+              ...(handle === 'nw' && { left: -edge - pad, top: -edge - pad, width: size, height: size }),
+              ...(handle === 'ne' && { right: -edge - pad, top: -edge - pad, width: size, height: size }),
+              ...(handle === 'se' && { right: -edge - pad, bottom: -edge - pad, width: size, height: size }),
+              ...(handle === 'sw' && { left: -edge - pad, bottom: -edge - pad, width: size, height: size }),
+            }
+          : {
+              ...base,
+              ...(handle === 'n' && { left: size, top: -edge - pad, right: size, height: size }),
+              ...(handle === 's' && { left: size, bottom: -edge - pad, right: size, height: size }),
+              ...(handle === 'w' && { top: size, left: -edge - pad, bottom: size, width: size }),
+              ...(handle === 'e' && { top: size, right: -edge - pad, bottom: size, width: size }),
+            };
+        return (
+          <div
+            key={handle}
+            className="canvas-block-resize"
+            style={style}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onResizeStart(handle, e);
+            }}
+          />
+        );
+      })}
 
       {/* Connection ports - rendered last with zIndex so they are on top */}
       {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
@@ -195,7 +214,7 @@ export function CanvasBlock({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 10,
+            zIndex: 15,
             ...(side === 'top' && { left: '50%', top: -15, transform: 'translateX(-50%)' }),
             ...(side === 'bottom' && { left: '50%', bottom: -15, transform: 'translateX(-50%)' }),
             ...(side === 'left' && { left: -15, top: '50%', transform: 'translateY(-50%)' }),

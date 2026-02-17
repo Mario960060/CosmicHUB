@@ -427,7 +427,7 @@ export function MoonDetailCard({ taskId, onClose, onZoomIn }: MoonDetailCardProp
         >
           {onZoomIn && moduleId && (
             <button
-              onClick={(e) => { e.stopPropagation(); onClose(); onZoomIn(moduleId); }}
+              onClick={async (e) => { e.stopPropagation(); await onZoomIn(moduleId); onClose(); }}
               style={{
                 display: 'flex',
                 alignItems: 'center',

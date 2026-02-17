@@ -93,6 +93,7 @@ export interface CanvasBlockData {
   color: string;
   fontColor?: string | null;
   fontSize: 'sm' | 'md' | 'lg';
+  textAlign?: 'left' | 'center' | 'right';
   zIndex: number;
 }
 

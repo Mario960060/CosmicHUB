@@ -148,7 +148,9 @@ export function transformModulesToCanvas(
   projectData?: any,
   positionsMap?: PositionsMap,
   projectSubtasks?: any[],
-  projectMinitasks?: any[]
+  projectMinitasks?: any[],
+  moduleSubtasks?: any[],
+  moduleMinitasks?: any[]
 ): CanvasObject[] {
   const centerX = canvasWidth / 2;
   const centerY = canvasHeight / 2;
@@ -178,7 +180,13 @@ export function transformModulesToCanvas(
   ];
 
   /* Równy kątowy odstęp: każda planeta w tej samej odległości od słońca */
-  const taskOrbitRadius = 80; /* miniatury tasków dookoła planet (oddalone od planety) */
+  /* Solar system: pozycje tasków i minitasków odzwierciedlają module system (jak moon→module), ze skalowaniem odstępów */
+  const taskOrbitRadius = 150; /* miniatury tasków dookoła planet */
+  const taskMinitaskOrbitRadius = 70; /* małe asteroidy (minitaski) dookoła taska */
+  const moduleViewOrbit = 350; /* task view / module view orbit */
+  const scaleTaskModuleToSolar = taskOrbitRadius / moduleViewOrbit; /* 80/350 */
+  const center = { x: centerX, y: centerY };
+
   modules.forEach((module, index) => {
     const angle =
       modules.length <= 1 ? -Math.PI / 2 : (index / modules.length) * Math.PI * 2 - Math.PI / 2;
@@ -214,22 +222,24 @@ export function transformModulesToCanvas(
       },
     });
 
-    /* Miniatury tasków dookoła modułu (planety) */
+    /* Miniatury tasków dookoła modułu – ZAWSZE z module view przeskalowane (moduł = źródło prawdy, solar tylko odzwierciedla) */
     const tasks = module.tasks || [];
-    const taskMinitaskOrbitRadius = 35; /* małe asteroidy (minitaski) dookoła taska */
     tasks.forEach((task: any, taskIndex: number) => {
       const taskAngle =
         tasks.length <= 1 ? -Math.PI / 2 : (taskIndex / tasks.length) * Math.PI * 2 - Math.PI / 2;
       const defaultTaskX = modPos.x + Math.cos(taskAngle) * taskOrbitRadius;
       const defaultTaskY = modPos.y + Math.sin(taskAngle) * taskOrbitRadius;
-      const taskPos = getPos(positionsMap, 'task', task.id, 'solar_system') ?? { x: defaultTaskX, y: defaultTaskY };
+      const taskPosModule = getPos(positionsMap, 'task', task.id, 'module', module.id);
+      const taskPos = taskPosModule
+        ? { x: modPos.x + (taskPosModule.x - center.x) * scaleTaskModuleToSolar, y: modPos.y + (taskPosModule.y - center.y) * scaleTaskModuleToSolar }
+        : { x: defaultTaskX, y: defaultTaskY };
       const taskProgress = calculateTaskProgress(task.subtasks || [], task.progress_percent);
       objects.push({
         id: task.id,
         type: 'task' as const,
         name: task.name,
         position: taskPos,
-        radius: 10,
+        radius: 30,
         color: getStatusColor(task.status),
         status: task.status,
         progress: taskProgress,
@@ -244,22 +254,26 @@ export function transformModulesToCanvas(
           isBlocked: task.status === 'blocked',
           isComplete: task.status === 'done' || task.status === 'completed',
           isMiniature: true,
+          isSolarSystemTask: true,
         },
       });
 
-      /* Minitaski z taska – małe asteroidy dookoła księżyca (taska) w Solar System */
+      /* Minitaski z taska – ZAWSZE z task view przeskalowane (task = źródło prawdy, solar tylko odzwierciedla) */
       const minitasks = task.minitasks || [];
       minitasks.forEach((minitask: any, mtIndex: number) => {
         const mtAngle = taskAngle + (mtIndex / Math.max(1, minitasks.length)) * Math.PI * 0.6;
         const defaultMtX = taskPos.x + Math.cos(mtAngle) * taskMinitaskOrbitRadius;
         const defaultMtY = taskPos.y + Math.sin(mtAngle) * taskMinitaskOrbitRadius;
-        const mtPos = getPos(positionsMap, 'minitask', minitask.id, 'solar_system') ?? { x: defaultMtX, y: defaultMtY };
+        const mtPosFromTask = getPos(positionsMap, 'minitask', minitask.id, 'task', undefined, task.id);
+        const mtPos = mtPosFromTask
+          ? { x: taskPos.x + (mtPosFromTask.x - center.x) * (taskMinitaskOrbitRadius / moduleViewOrbit), y: taskPos.y + (mtPosFromTask.y - center.y) * (taskMinitaskOrbitRadius / moduleViewOrbit) }
+          : { x: defaultMtX, y: defaultMtY };
         objects.push({
           id: minitask.id,
           type: 'minitask' as const,
           name: minitask.name,
           position: mtPos,
-          radius: 6,
+          radius: 12,
           color: getStatusColor(minitask.status),
           status: minitask.status,
           progress: calculateTaskProgress(minitask.subtasks || [], minitask.progress_percent),
@@ -277,6 +291,167 @@ export function transformModulesToCanvas(
             isSolarSystemMini: true,
           },
         });
+
+        /* Subtaski (malutkie satelity) dookoła minitaska w Solar System – pozycje z asteroid view przeskalowane */
+        const subtasks = minitask.subtasks || [];
+        const solarSubOrbit = 50; /* małe satelity przy minitasku */
+        const asteroidViewSubOrbit = 350;
+        const scaleSubToSolar = solarSubOrbit / asteroidViewSubOrbit;
+        subtasks.forEach((subtask: any, subIdx: number) => {
+          const subAngle = mtAngle + (subIdx / Math.max(1, subtasks.length)) * Math.PI * 0.5;
+          const defaultSubX = mtPos.x + Math.cos(subAngle) * solarSubOrbit;
+          const defaultSubY = mtPos.y + Math.sin(subAngle) * solarSubOrbit;
+          const subPosFromAsteroid = getPos(positionsMap, 'subtask', subtask.id, 'minitask', undefined, undefined, minitask.id);
+          const subPos = subPosFromAsteroid
+            ? { x: mtPos.x + (subPosFromAsteroid.x - center.x) * scaleSubToSolar, y: mtPos.y + (subPosFromAsteroid.y - center.y) * scaleSubToSolar }
+            : { x: defaultSubX, y: defaultSubY };
+          const satelliteType = subtask.satellite_type || 'notes';
+          const spacecraftType = SATELLITE_TYPE_TO_CSS[satelliteType] || 'voyager-probe';
+          const badge = getSatelliteBadgeMeta(satelliteType, subtask.satellite_data);
+          objects.push({
+            id: subtask.id,
+            type: 'subtask' as const,
+            name: subtask.name,
+            position: subPos,
+            radius: 8,
+            color: getStatusColor(subtask.status),
+            status: subtask.status,
+            metadata: {
+              taskId: task.id,
+              minitaskId: minitask.id,
+              subtaskId: subtask.id,
+              priorityStars: subtask.priority_stars,
+              spacecraftType,
+              satelliteType,
+              hideName: true,
+              isMiniature: true,
+              isSolarSystemSatellite: true,
+              ...badge,
+            },
+          });
+        });
+      });
+
+      /* Task-level subtasks (direct under task, not under minitask) – pozycje z module view przeskalowane do solar */
+      const minitaskSubIds = new Set((task.minitasks || []).flatMap((m: any) => (m.subtasks || []).map((s: any) => s.id)));
+      const taskLevelSubtasks = (task.subtasks || []).filter((s: any) => !minitaskSubIds.has(s.id));
+      const scaleTaskToSolar = 0.25; /* odległość w solar = 1/4 z task/module view */
+      const solarTaskSubOrbit = 20;
+      const solarTaskViewCenter = { x: centerX, y: centerY };
+      taskLevelSubtasks.forEach((subtask: any, subIdx: number) => {
+        const subAngle = taskAngle + (subIdx / Math.max(1, taskLevelSubtasks.length)) * Math.PI * 0.5;
+        const defaultSubX = taskPos.x + Math.cos(subAngle) * solarTaskSubOrbit * scaleTaskToSolar;
+        const defaultSubY = taskPos.y + Math.sin(subAngle) * solarTaskSubOrbit * scaleTaskToSolar;
+        const subPosFromTask = getPos(positionsMap, 'subtask', subtask.id, 'task', undefined, task.id);
+        const subPosModule = getPos(positionsMap, 'subtask', subtask.id, 'module', module.id);
+        const subPos = subPosFromTask
+          ? {
+              x: taskPos.x + (subPosFromTask.x - solarTaskViewCenter.x) * scaleTaskToSolar,
+              y: taskPos.y + (subPosFromTask.y - solarTaskViewCenter.y) * scaleTaskToSolar,
+            }
+          : (subPosModule && taskPosModule)
+            ? {
+                x: taskPos.x + (subPosModule.x - taskPosModule.x) * scaleTaskToSolar,
+                y: taskPos.y + (subPosModule.y - taskPosModule.y) * scaleTaskToSolar,
+              }
+            : { x: defaultSubX, y: defaultSubY };
+        const satelliteType = subtask.satellite_type || 'notes';
+        const spacecraftType = SATELLITE_TYPE_TO_CSS[satelliteType] || 'voyager-probe';
+        const badge = getSatelliteBadgeMeta(satelliteType, subtask.satellite_data);
+        objects.push({
+          id: subtask.id,
+          type: 'subtask' as const,
+          name: subtask.name,
+          position: subPos,
+          radius: 4,
+          color: getStatusColor(subtask.status),
+          status: subtask.status,
+          metadata: {
+            moduleId: module.id,
+            taskId: task.id,
+            subtaskId: subtask.id,
+            priorityStars: subtask.priority_stars,
+            spacecraftType,
+            satelliteType,
+            hideName: true,
+            isMiniature: true,
+            isSolarSystemSatellite: true,
+            ...badge,
+          },
+        });
+      });
+    });
+
+    /* Module-level minitasks (asteroids around planet, task-sized) – positions from module view scaled to solar */
+    const moduleMinsForPlanet = (moduleMinitasks || []).filter((m: any) => m.module_id === module.id);
+    const totalModuleChildren = tasks.length + moduleMinsForPlanet.length;
+    moduleMinsForPlanet.forEach((minitask: any, mtIndex: number) => {
+      const angle =
+        totalModuleChildren <= 1 ? -Math.PI / 2 : ((tasks.length + mtIndex) / totalModuleChildren) * Math.PI * 2 - Math.PI / 2;
+      const defaultMtX = modPos.x + Math.cos(angle) * taskOrbitRadius;
+      const defaultMtY = modPos.y + Math.sin(angle) * taskOrbitRadius;
+      const mtPosModule = getPos(positionsMap, 'minitask', minitask.id, 'module', module.id);
+      const mtPos = mtPosModule
+        ? { x: modPos.x + (mtPosModule.x - center.x) * scaleTaskModuleToSolar, y: modPos.y + (mtPosModule.y - center.y) * scaleTaskModuleToSolar }
+        : { x: defaultMtX, y: defaultMtY };
+      objects.push({
+        id: minitask.id,
+        type: 'minitask' as const,
+        name: minitask.name,
+        position: mtPos,
+        radius: 30,
+        color: getStatusColor(minitask.status),
+        status: minitask.status,
+        progress: calculateTaskProgress(minitask.subtasks || [], minitask.progress_percent),
+        metadata: {
+          moduleId: module.id,
+          minitaskId: minitask.id,
+          asteroidType: minitask.asteroid_type || 'rocky',
+          priorityStars: minitask.priority_stars,
+          due_date: minitask.due_date,
+          dueDateDays: daysRemaining(minitask.due_date),
+          isBlocked: minitask.status === 'blocked',
+          isComplete: minitask.status === 'done' || minitask.status === 'completed',
+          isSolarSystemModuleMinitask: true,
+        },
+      });
+    });
+
+    /* Module-level subtasks (satellites around planet) – positions from module view scaled to solar */
+    const moduleSubsForPlanet = (moduleSubtasks || []).filter((s: any) => s.module_id === module.id);
+    const moduleSubSpreadRadius = 280; /* same as in transformTasksToCanvas */
+    const scaleModuleSubToSolar = taskOrbitRadius / moduleSubSpreadRadius;
+    moduleSubsForPlanet.forEach((subtask: any, idx: number) => {
+      const subPosModule = getPos(positionsMap, 'subtask', subtask.id, 'module', module.id);
+      const defaultAngle = moduleSubsForPlanet.length <= 1 ? -Math.PI / 2 : (idx / Math.max(1, moduleSubsForPlanet.length)) * Math.PI * 2 - Math.PI / 2;
+      const jitter = 60 * Math.cos(idx * 1.7) + 40 * Math.sin(idx * 2.1);
+      const defaultX = center.x + Math.cos(defaultAngle) * (moduleSubSpreadRadius + jitter);
+      const defaultY = center.y + Math.sin(defaultAngle) * (moduleSubSpreadRadius + jitter);
+      const subPos = subPosModule
+        ? { x: modPos.x + (subPosModule.x - center.x) * scaleModuleSubToSolar, y: modPos.y + (subPosModule.y - center.y) * scaleModuleSubToSolar }
+        : { x: modPos.x + Math.cos(defaultAngle) * taskOrbitRadius * 0.6, y: modPos.y + Math.sin(defaultAngle) * taskOrbitRadius * 0.6 };
+      const satelliteType = subtask.satellite_type || 'notes';
+      const spacecraftType = SATELLITE_TYPE_TO_CSS[satelliteType] || 'voyager-probe';
+      const badge = getSatelliteBadgeMeta(satelliteType, subtask.satellite_data);
+      objects.push({
+        id: subtask.id,
+        type: 'subtask' as const,
+        name: subtask.name,
+        position: subPos,
+        radius: 8,
+        color: getStatusColor(subtask.status),
+        status: subtask.status,
+        metadata: {
+          moduleId: module.id,
+          subtaskId: subtask.id,
+          priorityStars: subtask.priority_stars,
+          spacecraftType,
+          satelliteType,
+          hideName: true,
+          isMiniature: true,
+          isSolarSystemSatellite: true,
+          ...badge,
+        },
       });
     });
   });
@@ -342,6 +517,7 @@ export function transformModulesToCanvas(
         isBlocked: minitask.status === 'blocked',
         isComplete: minitask.status === 'done' || minitask.status === 'completed',
         isMiniature: true,
+        isProjectLevelMinitask: true,
       },
     });
   });
@@ -521,14 +697,22 @@ export function transformTasksToCanvas(
       });
     });
 
-    // Subtasks dookoła zadania (miniature satellites)
-    if (task.subtasks && task.subtasks.length > 0) {
+    // Task-level subtasks (direct under task, not under minitask) – task = źródło prawdy, prefer task over module
+    const minitaskSubIds = new Set((task.minitasks || []).flatMap((m: any) => (m.subtasks || []).map((s: any) => s.id)));
+    const taskLevelSubtasks = (task.subtasks || []).filter((s: any) => !minitaskSubIds.has(s.id));
+    if (taskLevelSubtasks.length > 0) {
       const subRadius = 70;
-      task.subtasks.forEach((subtask: any, subIndex: number) => {
-        const subAngle = angle + (subIndex / task.subtasks.length) * Math.PI * 0.5;
+      const taskViewCenter = { x: centerX, y: centerY };
+      taskLevelSubtasks.forEach((subtask: any, subIndex: number) => {
+        const subAngle = angle + (subIndex / taskLevelSubtasks.length) * Math.PI * 0.5;
         const defaultSubX = taskPos.x + Math.cos(subAngle) * subRadius;
         const defaultSubY = taskPos.y + Math.sin(subAngle) * subRadius;
-        const subPos = getPos(positionsMap, 'subtask', subtask.id, 'module', moduleId) ?? { x: defaultSubX, y: defaultSubY };
+        const subPosModule = getPos(positionsMap, 'subtask', subtask.id, 'module', moduleId);
+        const subPosFromTask = getPos(positionsMap, 'subtask', subtask.id, 'task', undefined, task.id);
+        const scaleTaskToModule = 0.25; /* odległość w module = 1/4 odległości z task view */
+        const subPos = subPosFromTask
+          ? { x: taskPos.x + (subPosFromTask.x - taskViewCenter.x) * scaleTaskToModule, y: taskPos.y + (subPosFromTask.y - taskViewCenter.y) * scaleTaskToModule }
+          : (subPosModule ?? { x: defaultSubX, y: defaultSubY });
         const satelliteType = subtask.satellite_type || 'notes';
         const spacecraftType = SATELLITE_TYPE_TO_CSS[satelliteType] || 'voyager-probe';
         const badge = getSatelliteBadgeMeta(satelliteType, subtask.satellite_data);
@@ -613,6 +797,7 @@ export function transformTasksToCanvas(
         isBlocked: minitask.status === 'blocked',
         isComplete: minitask.status === 'done' || minitask.status === 'completed',
         isMiniature: false,
+        isModuleLevelMinitask: true,
       },
     });
 
@@ -798,14 +983,20 @@ export function transformMinitasksToCanvas(
     });
   });
 
-  // Subtasks belonging directly to task (parent_id) - around center, not under minitasks
+  // Subtasks belonging directly to task (parent_id) – pozycje z task lub module view
   const taskSubtasks = (taskData?.subtasks || []).filter((s: any) => s.parent_id === taskData?.id);
   const directSubRadius = 120;
+  const taskViewCenter = { x: centerX, y: centerY };
+  const taskPosModule = moduleId ? getPos(positionsMap, 'task', taskData?.id, 'module', moduleId) : undefined;
   taskSubtasks.forEach((subtask: any, subIdx: number) => {
     const angle = (subIdx / Math.max(1, taskSubtasks.length)) * Math.PI * 2 - Math.PI / 2;
     const defaultSubX = centerX + Math.cos(angle) * directSubRadius;
     const defaultSubY = centerY + Math.sin(angle) * directSubRadius;
-    const subPos = getPos(positionsMap, 'subtask', subtask.id, 'task', undefined, taskData?.id) ?? { x: defaultSubX, y: defaultSubY };
+    const subPosFromTask = getPos(positionsMap, 'subtask', subtask.id, 'task', undefined, taskData?.id);
+    const subPosModule = moduleId ? getPos(positionsMap, 'subtask', subtask.id, 'module', moduleId) : undefined;
+    const subPos = subPosFromTask ?? (subPosModule && taskPosModule
+      ? { x: taskViewCenter.x + (subPosModule.x - taskPosModule.x), y: taskViewCenter.y + (subPosModule.y - taskPosModule.y) }
+      : { x: defaultSubX, y: defaultSubY });
     const satelliteType = subtask.satellite_type || 'notes';
     const spacecraftType = SATELLITE_TYPE_TO_CSS[satelliteType] || 'voyager-probe';
     const badge = getSatelliteBadgeMeta(satelliteType, subtask.satellite_data);
@@ -904,7 +1095,8 @@ export function transformSubtasksToCanvas(
     const angle = subtasks.length <= 1 ? -Math.PI / 2 : (idx / subtasks.length) * Math.PI * 2 - Math.PI / 2;
     const defaultX = centerX + Math.cos(angle) * defaultOrbitRadius;
     const defaultY = centerY + Math.sin(angle) * defaultOrbitRadius;
-    const subPos = getPos(positionsMap, 'subtask', subtask.id, 'minitask', undefined, undefined, minitaskId) ?? { x: defaultX, y: defaultY };
+    const savedPos = getPos(positionsMap, 'subtask', subtask.id, 'minitask', undefined, undefined, minitaskId);
+    const subPos = savedPos ?? { x: defaultX, y: defaultY };
     const satelliteType = subtask.satellite_type || 'notes';
     const spacecraftType = SATELLITE_TYPE_TO_CSS[satelliteType] || 'voyager-probe';
     const badge = getSatelliteBadgeMeta(satelliteType, subtask.satellite_data);

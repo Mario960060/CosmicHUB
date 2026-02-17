@@ -533,7 +533,7 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
         >
           {onZoomIn && (
             <button
-              onClick={() => { onClose(); onZoomIn(); }}
+              onClick={async () => { await onZoomIn(); onClose(); }}
               style={{
                 display: 'flex',
                 alignItems: 'center',

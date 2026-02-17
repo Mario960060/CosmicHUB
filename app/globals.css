@@ -685,3 +685,110 @@ input:-webkit-autofill:active {
 .scrollbar-cosmic::-webkit-scrollbar-corner {
   background: #0d1117;
 }
+
+/* Scrollbar variants – colors match the box they're in (canvas blocks, etc.) */
+.scrollbar-cosmic-neutral,
+.scrollbar-cosmic-cyan,
+.scrollbar-cosmic-rose,
+.scrollbar-cosmic-indigo,
+.scrollbar-cosmic-teal,
+.scrollbar-cosmic-green,
+.scrollbar-cosmic-amber,
+.scrollbar-cosmic-purple,
+.scrollbar-cosmic-orange {
+  scrollbar-width: thin;
+}
+
+.scrollbar-cosmic-neutral { scrollbar-color: rgba(255,255,255,0.5) rgba(255,255,255,0.06); }
+.scrollbar-cosmic-neutral::-webkit-scrollbar-track { background: rgba(255,255,255,0.06); }
+.scrollbar-cosmic-neutral::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.4); border-color: rgba(255,255,255,0.06); }
+.scrollbar-cosmic-neutral::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.6); }
+.scrollbar-cosmic-neutral::-webkit-scrollbar-corner { background: rgba(255,255,255,0.06); }
+
+.scrollbar-cosmic-cyan { scrollbar-color: rgba(103,232,249,0.6) rgba(0,240,255,0.08); }
+.scrollbar-cosmic-cyan::-webkit-scrollbar-track { background: rgba(0,240,255,0.08); }
+.scrollbar-cosmic-cyan::-webkit-scrollbar-thumb { background: rgba(103,232,249,0.5); border-color: rgba(0,240,255,0.08); }
+.scrollbar-cosmic-cyan::-webkit-scrollbar-thumb:hover { background: rgba(103,232,249,0.75); }
+.scrollbar-cosmic-cyan::-webkit-scrollbar-corner { background: rgba(0,240,255,0.08); }
+
+.scrollbar-cosmic-rose { scrollbar-color: rgba(251,113,133,0.6) rgba(244,63,94,0.08); }
+.scrollbar-cosmic-rose::-webkit-scrollbar-track { background: rgba(244,63,94,0.08); }
+.scrollbar-cosmic-rose::-webkit-scrollbar-thumb { background: rgba(251,113,133,0.5); border-color: rgba(244,63,94,0.08); }
+.scrollbar-cosmic-rose::-webkit-scrollbar-thumb:hover { background: rgba(251,113,133,0.75); }
+.scrollbar-cosmic-rose::-webkit-scrollbar-corner { background: rgba(244,63,94,0.08); }
+
+.scrollbar-cosmic-indigo { scrollbar-color: rgba(165,180,252,0.6) rgba(129,140,248,0.08); }
+.scrollbar-cosmic-indigo::-webkit-scrollbar-track { background: rgba(129,140,248,0.08); }
+.scrollbar-cosmic-indigo::-webkit-scrollbar-thumb { background: rgba(165,180,252,0.5); border-color: rgba(129,140,248,0.08); }
+.scrollbar-cosmic-indigo::-webkit-scrollbar-thumb:hover { background: rgba(165,180,252,0.75); }
+.scrollbar-cosmic-indigo::-webkit-scrollbar-corner { background: rgba(129,140,248,0.08); }
+
+.scrollbar-cosmic-teal { scrollbar-color: rgba(94,234,212,0.6) rgba(20,184,166,0.08); }
+.scrollbar-cosmic-teal::-webkit-scrollbar-track { background: rgba(20,184,166,0.08); }
+.scrollbar-cosmic-teal::-webkit-scrollbar-thumb { background: rgba(94,234,212,0.5); border-color: rgba(20,184,166,0.08); }
+.scrollbar-cosmic-teal::-webkit-scrollbar-thumb:hover { background: rgba(94,234,212,0.75); }
+.scrollbar-cosmic-teal::-webkit-scrollbar-corner { background: rgba(20,184,166,0.08); }
+
+.scrollbar-cosmic-green { scrollbar-color: rgba(74,222,128,0.6) rgba(34,197,94,0.08); }
+.scrollbar-cosmic-green::-webkit-scrollbar-track { background: rgba(34,197,94,0.08); }
+.scrollbar-cosmic-green::-webkit-scrollbar-thumb { background: rgba(74,222,128,0.5); border-color: rgba(34,197,94,0.08); }
+.scrollbar-cosmic-green::-webkit-scrollbar-thumb:hover { background: rgba(74,222,128,0.75); }
+.scrollbar-cosmic-green::-webkit-scrollbar-corner { background: rgba(34,197,94,0.08); }
+
+.scrollbar-cosmic-amber { scrollbar-color: rgba(251,191,36,0.6) rgba(245,158,11,0.08); }
+.scrollbar-cosmic-amber::-webkit-scrollbar-track { background: rgba(245,158,11,0.08); }
+.scrollbar-cosmic-amber::-webkit-scrollbar-thumb { background: rgba(251,191,36,0.5); border-color: rgba(245,158,11,0.08); }
+.scrollbar-cosmic-amber::-webkit-scrollbar-thumb:hover { background: rgba(251,191,36,0.75); }
+.scrollbar-cosmic-amber::-webkit-scrollbar-corner { background: rgba(245,158,11,0.08); }
+
+.scrollbar-cosmic-purple { scrollbar-color: rgba(192,132,252,0.6) rgba(168,85,247,0.08); }
+.scrollbar-cosmic-purple::-webkit-scrollbar-track { background: rgba(168,85,247,0.08); }
+.scrollbar-cosmic-purple::-webkit-scrollbar-thumb { background: rgba(192,132,252,0.5); border-color: rgba(168,85,247,0.08); }
+.scrollbar-cosmic-purple::-webkit-scrollbar-thumb:hover { background: rgba(192,132,252,0.75); }
+.scrollbar-cosmic-purple::-webkit-scrollbar-corner { background: rgba(168,85,247,0.08); }
+
+.scrollbar-cosmic-orange { scrollbar-color: rgba(251,146,60,0.6) rgba(249,115,22,0.08); }
+.scrollbar-cosmic-orange::-webkit-scrollbar-track { background: rgba(249,115,22,0.08); }
+.scrollbar-cosmic-orange::-webkit-scrollbar-thumb { background: rgba(251,146,60,0.5); border-color: rgba(249,115,22,0.08); }
+.scrollbar-cosmic-orange::-webkit-scrollbar-thumb:hover { background: rgba(251,146,60,0.75); }
+.scrollbar-cosmic-orange::-webkit-scrollbar-corner { background: rgba(249,115,22,0.08); }
+
+/* Shared webkit scrollbar size for all variants */
+.scrollbar-cosmic-neutral::-webkit-scrollbar,
+.scrollbar-cosmic-cyan::-webkit-scrollbar,
+.scrollbar-cosmic-rose::-webkit-scrollbar,
+.scrollbar-cosmic-indigo::-webkit-scrollbar,
+.scrollbar-cosmic-teal::-webkit-scrollbar,
+.scrollbar-cosmic-green::-webkit-scrollbar,
+.scrollbar-cosmic-amber::-webkit-scrollbar,
+.scrollbar-cosmic-purple::-webkit-scrollbar,
+.scrollbar-cosmic-orange::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scrollbar-cosmic-neutral::-webkit-scrollbar-thumb,
+.scrollbar-cosmic-cyan::-webkit-scrollbar-thumb,
+.scrollbar-cosmic-rose::-webkit-scrollbar-thumb,
+.scrollbar-cosmic-indigo::-webkit-scrollbar-thumb,
+.scrollbar-cosmic-teal::-webkit-scrollbar-thumb,
+.scrollbar-cosmic-green::-webkit-scrollbar-thumb,
+.scrollbar-cosmic-amber::-webkit-scrollbar-thumb,
+.scrollbar-cosmic-purple::-webkit-scrollbar-thumb,
+.scrollbar-cosmic-orange::-webkit-scrollbar-thumb {
+  border-radius: 5px;
+  border-width: 2px;
+  border-style: solid;
+}
+
+.scrollbar-cosmic-neutral::-webkit-scrollbar-track,
+.scrollbar-cosmic-cyan::-webkit-scrollbar-track,
+.scrollbar-cosmic-rose::-webkit-scrollbar-track,
+.scrollbar-cosmic-indigo::-webkit-scrollbar-track,
+.scrollbar-cosmic-teal::-webkit-scrollbar-track,
+.scrollbar-cosmic-green::-webkit-scrollbar-track,
+.scrollbar-cosmic-amber::-webkit-scrollbar-track,
+.scrollbar-cosmic-purple::-webkit-scrollbar-track,
+.scrollbar-cosmic-orange::-webkit-scrollbar-track {
+  border-radius: 5px;
+}

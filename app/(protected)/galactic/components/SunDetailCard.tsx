@@ -670,7 +670,7 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
           >
             {onZoomIn && modules.length > 0 && (
               <button
-                onClick={() => { onClose(); onZoomIn(modules[0].id); }}
+                onClick={async () => { await onZoomIn(modules[0].id); onClose(); }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',

@@ -60,10 +60,15 @@ export function scalePositionsToCanvas(
   const maxY = Math.max(...entries.map(([, v]) => v.y));
   let scaleX: number;
   let scaleY: number;
-  if (maxX > 5000 || maxY > 3000) {
+  /* Pozycje w zakresie ±canvasWidth×2 i ±canvasHeight×2 są aktualne (4800×2700).
+     Module-context subtaski mogą mieć wartości do ~4800, co jest OK.
+     Tylko pozycje z PREV (9600×5400) lub OLD (1920×1080) wymagają skalowania.
+     Heurystyka: PREV miał canvas 9600 → pozycje >8000 to pewny PREV; OLD miał 1920 → wszystko <2000.
+     Pozycje 2500-8000 to normalny zakres 4800×2700 canvas (mogą wyjść poza canvas). */
+  if (maxX > 8000 || maxY > 4500) {
     scaleX = canvasWidth / PREV_CANVAS_WIDTH;
     scaleY = canvasHeight / PREV_CANVAS_HEIGHT;
-  } else if (maxX < 2500 && maxY < 1500) {
+  } else if (maxX < 2000 && maxY < 1200) {
     scaleX = canvasWidth / OLD_CANVAS_WIDTH;
     scaleY = canvasHeight / OLD_CANVAS_HEIGHT;
   } else {

@@ -23,6 +23,8 @@ export type BlockColor =
 
 export type BlockFontSize = 'sm' | 'md' | 'lg';
 
+export type BlockTextAlign = 'left' | 'center' | 'right';
+
 export interface CanvasBlock {
   id: string;
   x: number;
@@ -33,6 +35,7 @@ export interface CanvasBlock {
   color: BlockColor;
   fontColor: BlockColor | null;
   fontSize: BlockFontSize;
+  textAlign: BlockTextAlign;
   zIndex: number;
 }
 
@@ -86,10 +89,11 @@ function createStateSnapshot(state: CanvasState): CanvasState {
 }
 
 function normalizeBlock(b: CanvasBlock | Record<string, unknown>): CanvasBlock {
-  const block = b as CanvasBlock & { fontColor?: BlockColor | null };
+  const block = b as CanvasBlock & { fontColor?: BlockColor | null; textAlign?: BlockTextAlign };
   return {
     ...block,
     fontColor: block.fontColor ?? null,
+    textAlign: block.textAlign ?? 'left',
   };
 }
 
@@ -190,6 +194,7 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
         color: 'neutral',
         fontColor: null,
         fontSize: 'md',
+        textAlign: 'left',
         zIndex: state.blocks.length + 1,
       };
       setState((s) => ({ ...s, blocks: [...s.blocks, block] }));
@@ -252,19 +257,19 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
   );
 
   const resizeBlock = useCallback(
-    (id: string, width: number, height: number) => {
+    (id: string, updates: Partial<{ x: number; y: number; width: number; height: number }>) => {
       pushUndo();
       setState((s) => ({
         ...s,
-        blocks: s.blocks.map((b) =>
-          b.id === id
-            ? {
-                ...b,
-                width: Math.max(120, Math.min(600, width)),
-                height: Math.max(80, Math.min(400, height)),
-              }
-            : b
-        ),
+        blocks: s.blocks.map((b) => {
+          if (b.id !== id) return b;
+          const next = { ...b, ...updates };
+          return {
+            ...next,
+            width: Math.max(1, next.width ?? b.width),
+            height: Math.max(1, next.height ?? b.height),
+          };
+        }),
       }));
     },
     [pushUndo]
@@ -308,6 +313,17 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
       setState((s) => ({
         ...s,
         blocks: s.blocks.map((b) => (b.id === id ? { ...b, fontSize } : b)),
+      }));
+    },
+    [pushUndo]
+  );
+
+  const updateBlockTextAlign = useCallback(
+    (id: string, textAlign: BlockTextAlign) => {
+      pushUndo();
+      setState((s) => ({
+        ...s,
+        blocks: s.blocks.map((b) => (b.id === id ? { ...b, textAlign } : b)),
       }));
     },
     [pushUndo]
@@ -741,6 +757,7 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
     updateBlockColor,
     updateBlockFontColor,
     updateBlockFontSize,
+    updateBlockTextAlign,
     addConnection,
     deleteConnection,
     updateConnection,

@@ -65,6 +65,7 @@ export function CanvasListContent({
 
   return (
     <div
+      className="scrollbar-cosmic scrollbar-cosmic-orange"
       style={{
         padding: 16,
         display: 'flex',
@@ -203,7 +204,7 @@ export function CanvasListContent({
               </button>
               {assignOpen && (
                 <div
-                  className="scrollbar-cosmic"
+                  className="scrollbar-cosmic scrollbar-cosmic-orange"
                   style={{
                     position: 'absolute',
                     top: '100%',

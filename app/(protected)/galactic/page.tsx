@@ -9,6 +9,7 @@ import { GalacticScene } from './components/GalacticScene';
 import { GalaxyCanvas } from './components/GalaxyCanvas';
 import { GalaxyPalette, type PaletteItem } from './components/GalaxyPalette';
 import { GalaxyContextMenu, type ContextMenuAction } from './components/GalaxyContextMenu';
+import { useQueryClient } from '@tanstack/react-query';
 import { useGalacticData } from '@/hooks/use-galactic-data';
 import { useProjects, useProjectMembers } from '@/lib/pm/queries';
 import { useSaveGalaxyPositions, useGalaxyPositions, type SavePositionPayload, copyPositionsToNewContext } from './hooks/use-galaxy-positions';
@@ -130,6 +131,7 @@ export default function GalacticPage() {
     cancelConnectionMode,
   } = useGalaxyEditor();
 
+  const queryClient = useQueryClient();
   const savePositions = useSaveGalaxyPositions(selectedProjectId ?? null);
   const deleteModule = useDeleteModule();
   const deleteTask = useDeleteTask();
@@ -208,6 +210,7 @@ export default function GalacticPage() {
   const ASTEROID_VIEW_SUB_ORBIT = 350;
   const MODULE_SUB_RADIUS_TASK = 100;
   const MODULE_SUB_RADIUS_MODULE = 100;
+  const SOLAR_SUB_ORBIT = 50; /* małe satelity przy minitasku w Solar System */
 
   const performSave = useCallback(async (deletedEntityIds?: Set<string>) => {
     if (!selectedProjectId || !data?.objects) return;
@@ -230,20 +233,35 @@ export default function GalacticPage() {
         }
         // Subtasks belonging to minitasks: save with minitask context so positions persist in asteroid view
         const objMinitaskId = obj.metadata?.minitaskId as string | undefined;
-        const useMinitaskContext = entityType === 'subtask' && objMinitaskId;
-        const effectiveViewContext = useMinitaskContext ? 'minitask' : viewContext;
-        const effectiveMinitaskId = useMinitaskContext ? objMinitaskId : minitaskId;
+        const objModuleId = obj.metadata?.moduleId as string | undefined;
+        const objTaskId = obj.metadata?.taskId as string | undefined;
+        const useMinitaskContext = entityType === 'subtask' && (objMinitaskId || viewContext === 'minitask');
+        // Module-level subtasks (around planet): save with module context
+        const useModuleContextForSubtask = entityType === 'subtask' && !objMinitaskId && objModuleId && !objTaskId && viewContext === 'solar_system';
+        // Task-level subtasks (around task/moon): save with module context, different position conversion
+        const useTaskSubtaskContextFromSolar = entityType === 'subtask' && !objMinitaskId && objModuleId && objTaskId && viewContext === 'solar_system';
+        const effectiveViewContext = useMinitaskContext ? 'minitask' : (useModuleContextForSubtask || useTaskSubtaskContextFromSolar) ? 'module' : viewContext;
+        const effectiveMinitaskId = useMinitaskContext ? (objMinitaskId ?? minitaskId) : minitaskId;
+        const effectiveModuleIdForPayload = (useModuleContextForSubtask || useTaskSubtaskContextFromSolar) ? objModuleId : moduleId;
+        const effectiveTaskIdForPayload = useTaskSubtaskContextFromSolar ? objTaskId : taskId;
 
-        // When saving subtask in minitask context from task/module view: convert pos to asteroid view coords
+        // When saving subtask in minitask context from task/module/solar view: convert pos to asteroid view coords
         if (useMinitaskContext && viewContext !== 'minitask') {
           const asteroid = data.objects.find((o) => o.type === 'minitask' && o.id === objMinitaskId);
-          const asteroidPos = asteroid?.position;
+          const asteroidPos = asteroid ? (positionOverrides.get(asteroid.id) ?? asteroid.position) : undefined;
           if (asteroidPos) {
             if (viewContext === 'task') {
               // Task view: subPos = mtPos + (stored - center) => stored = center + (pos - mtPos)
               pos = {
                 x: ASTEROID_VIEW_CENTER.x + (pos.x - asteroidPos.x),
                 y: ASTEROID_VIEW_CENTER.y + (pos.y - asteroidPos.y),
+              };
+            } else if (viewContext === 'solar_system') {
+              // Solar view: subPos = mtPos + (stored - center) * scale => stored = center + (pos - mtPos) / scale
+              const scale = SOLAR_SUB_ORBIT / ASTEROID_VIEW_SUB_ORBIT;
+              pos = {
+                x: ASTEROID_VIEW_CENTER.x + (pos.x - asteroidPos.x) / scale,
+                y: ASTEROID_VIEW_CENTER.y + (pos.y - asteroidPos.y) / scale,
               };
             } else {
               // Module view: subPos = mtPos + (stored - center) * scale => stored = center + (pos - mtPos) / scale
@@ -257,14 +275,55 @@ export default function GalacticPage() {
           }
         }
 
+        // When saving module-level subtask from solar view: convert pos to module view coords (planet at center)
+        if (useModuleContextForSubtask && objModuleId) {
+          const planet = data.objects.find((o) => o.type === 'module' && o.id === objModuleId);
+          const planetPos = planet ? (positionOverrides.get(planet.id) ?? planet.position) : undefined;
+          if (planetPos) {
+            const scaleModuleSubToSolar = 150 / 280; // taskOrbitRadius / moduleSubSpreadRadius
+            const converted = {
+              x: CANVAS_WIDTH / 2 + (pos.x - planetPos.x) / scaleModuleSubToSolar,
+              y: CANVAS_HEIGHT / 2 + (pos.y - planetPos.y) / scaleModuleSubToSolar,
+            };
+            // Clamp to safe range to avoid triggering scalePositionsToCanvas rescale
+            pos = {
+              x: Math.max(-CANVAS_WIDTH, Math.min(CANVAS_WIDTH * 2, converted.x)),
+              y: Math.max(-CANVAS_HEIGHT, Math.min(CANVAS_HEIGHT * 2, converted.y)),
+            };
+          }
+        }
+
+        // When saving task-level subtask from solar view: convert pos to module view coords (task at center)
+        if (useTaskSubtaskContextFromSolar && objModuleId && objTaskId) {
+          const task = data.objects.find((o) => o.type === 'task' && o.id === objTaskId);
+          const planet = data.objects.find((o) => o.type === 'module' && o.id === objModuleId);
+          const taskPos = task ? (positionOverrides.get(task.id) ?? task.position) : undefined;
+          const modPos = planet ? (positionOverrides.get(planet.id) ?? planet.position) : undefined;
+          const center = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+          if (taskPos && modPos) {
+            const scaleTaskModuleToSolar = 150 / 350; // taskOrbitRadius / moduleViewOrbit
+            const taskPosModule = { x: center.x + (taskPos.x - modPos.x) / scaleTaskModuleToSolar, y: center.y + (taskPos.y - modPos.y) / scaleTaskModuleToSolar };
+            const scaleTaskToSolar = 0.25;
+            const converted = {
+              x: taskPosModule.x + (pos.x - taskPos.x) / scaleTaskToSolar,
+              y: taskPosModule.y + (pos.y - taskPos.y) / scaleTaskToSolar,
+            };
+            // Clamp to safe range
+            pos = {
+              x: Math.max(-CANVAS_WIDTH, Math.min(CANVAS_WIDTH * 2, converted.x)),
+              y: Math.max(-CANVAS_HEIGHT, Math.min(CANVAS_HEIGHT * 2, converted.y)),
+            };
+          }
+        }
+
         const payload: Record<string, unknown> = {
           entity_type: entityType,
           entity_id: entityId,
           x: pos.x,
           y: pos.y,
           view_context: effectiveViewContext as 'solar_system' | 'module' | 'task' | 'minitask',
-          module_id: moduleId,
-          task_id: taskId,
+          module_id: effectiveModuleIdForPayload ?? moduleId,
+          task_id: effectiveTaskIdForPayload ?? taskId,
         };
         if (effectiveMinitaskId) payload.minitask_id = effectiveMinitaskId;
         return payload;
@@ -277,19 +336,31 @@ export default function GalacticPage() {
         const meta = newEntityMeta.get(id);
         if (meta) {
           const metaMinitaskId = meta.minitaskId as string | undefined;
-          const useMinitaskContext = meta.type === 'subtask' && metaMinitaskId;
-          const effectiveViewContext = useMinitaskContext ? 'minitask' : viewContext;
-          const effectiveMinitaskId = useMinitaskContext ? metaMinitaskId : minitaskId;
+          const metaModuleId = meta.moduleId as string | undefined;
+          const metaTaskId = meta.taskId as string | undefined;
+          const useMinitaskContext = meta.type === 'subtask' && (metaMinitaskId || viewContext === 'minitask');
+          const useModuleContextForSubtask = meta.type === 'subtask' && !metaMinitaskId && metaModuleId && !metaTaskId && viewContext === 'solar_system';
+          const useTaskSubtaskContextFromSolar = meta.type === 'subtask' && !metaMinitaskId && metaModuleId && metaTaskId && viewContext === 'solar_system';
+          const effectiveViewContext = useMinitaskContext ? 'minitask' : (useModuleContextForSubtask || useTaskSubtaskContextFromSolar) ? 'module' : viewContext;
+          const effectiveMinitaskId = useMinitaskContext ? (metaMinitaskId ?? minitaskId) : minitaskId;
+          const effectiveModuleIdForPayload = (useModuleContextForSubtask || useTaskSubtaskContextFromSolar) ? metaModuleId : moduleId;
+          const effectiveTaskIdForPayload = useTaskSubtaskContextFromSolar ? metaTaskId : taskId;
 
           let savePos = pos;
           if (useMinitaskContext && viewContext !== 'minitask') {
             const asteroid = data.objects.find((o) => o.type === 'minitask' && o.id === metaMinitaskId);
-            const asteroidPos = asteroid?.position;
+            const asteroidPos = asteroid ? (positionOverrides.get(asteroid.id) ?? asteroid.position) : undefined;
             if (asteroidPos) {
               if (viewContext === 'task') {
                 savePos = {
                   x: ASTEROID_VIEW_CENTER.x + (pos.x - asteroidPos.x),
                   y: ASTEROID_VIEW_CENTER.y + (pos.y - asteroidPos.y),
+                };
+              } else if (viewContext === 'solar_system') {
+                const scale = SOLAR_SUB_ORBIT / ASTEROID_VIEW_SUB_ORBIT;
+                savePos = {
+                  x: ASTEROID_VIEW_CENTER.x + (pos.x - asteroidPos.x) / scale,
+                  y: ASTEROID_VIEW_CENTER.y + (pos.y - asteroidPos.y) / scale,
                 };
               } else {
                 const isTaskAsteroid = !!asteroid?.metadata?.taskId;
@@ -302,14 +373,43 @@ export default function GalacticPage() {
             }
           }
 
+          if (useModuleContextForSubtask && metaModuleId) {
+            const planet = data.objects.find((o) => o.type === 'module' && o.id === metaModuleId);
+            const planetPos = planet ? (positionOverrides.get(planet.id) ?? planet.position) : undefined;
+            if (planetPos) {
+              const scaleModuleSubToSolar = 150 / 280;
+              savePos = {
+                x: CANVAS_WIDTH / 2 + (pos.x - planetPos.x) / scaleModuleSubToSolar,
+                y: CANVAS_HEIGHT / 2 + (pos.y - planetPos.y) / scaleModuleSubToSolar,
+              };
+            }
+          }
+
+          if (useTaskSubtaskContextFromSolar && metaModuleId && metaTaskId) {
+            const task = data.objects.find((o) => o.type === 'task' && o.id === metaTaskId);
+            const planet = data.objects.find((o) => o.type === 'module' && o.id === metaModuleId);
+            const taskPos = task ? (positionOverrides.get(task.id) ?? task.position) : undefined;
+            const modPos = planet ? (positionOverrides.get(planet.id) ?? planet.position) : undefined;
+            const center = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
+            if (taskPos && modPos) {
+              const scaleTaskModuleToSolar = 150 / 350;
+              const taskPosModule = { x: center.x + (taskPos.x - modPos.x) / scaleTaskModuleToSolar, y: center.y + (taskPos.y - modPos.y) / scaleTaskModuleToSolar };
+              const scaleTaskSubToSolar = 20 / 70;
+              savePos = {
+                x: taskPosModule.x + (pos.x - taskPos.x) / scaleTaskSubToSolar,
+                y: taskPosModule.y + (pos.y - taskPos.y) / scaleTaskSubToSolar,
+              };
+            }
+          }
+
           const payload: Record<string, unknown> = {
             entity_type: meta.type,
             entity_id: id,
             x: savePos.x,
             y: savePos.y,
             view_context: effectiveViewContext as 'solar_system' | 'module' | 'task' | 'minitask',
-            module_id: moduleId,
-            task_id: taskId,
+            module_id: effectiveModuleIdForPayload ?? moduleId,
+            task_id: effectiveTaskIdForPayload ?? taskId,
           };
           if (effectiveMinitaskId) payload.minitask_id = effectiveMinitaskId;
           currentViewPositions.push(payload);
@@ -317,8 +417,16 @@ export default function GalacticPage() {
       }
     }
 
-    const key = (p: { entity_type: string; entity_id: string; view_context: string; module_id?: string | null; task_id?: string | null; minitask_id?: string | null }) =>
-      `${p.view_context}:${p.module_id ?? 'null'}:${p.task_id ?? 'null'}:${(p as any).minitask_id ?? 'null'}:${p.entity_type}:${p.entity_id}`;
+    const key = (p: { view_context: string; module_id?: string | null; task_id?: string | null; minitask_id?: string | null; entity_type: string; entity_id: string }) => {
+      const vc = p.view_context;
+      const mid = (p as any).minitask_id;
+      const tid = (p as any).task_id;
+      const mod = p.module_id;
+      if (vc === 'minitask' && mid) return `${p.entity_type}:${p.entity_id}:${mid}`;
+      if (vc === 'task' && tid) return `${p.entity_type}:${p.entity_id}:${tid}`;
+      if (vc === 'module' && mod) return `${p.entity_type}:${p.entity_id}:${mod}`;
+      return `${p.entity_type}:${p.entity_id}:solar_system`;
+    };
     const merged = new Map<string, typeof currentViewPositions[0]>();
     for (const p of existingPositions ?? []) {
       const k = key({ ...p, task_id: (p as any).task_id, minitask_id: (p as any).minitask_id });
@@ -350,13 +458,20 @@ export default function GalacticPage() {
     }
     try {
       await savePositions.mutateAsync(toSave);
+      // Refetch with exact keys so minitask positions are fresh before we clear overrides
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['galaxy-positions', selectedProjectId] }),
+        queryClient.refetchQueries({
+          queryKey: ['galactic-data', zoomLevel, selectedProjectId, selectedModuleId, selectedTaskId, selectedMinitaskId, 4800, 2700],
+        }),
+      ]);
       setPositionOverrides(new Map());
       setNewEntityMeta(new Map());
     } catch (err) {
       toast.error('Failed to save positions', { description: (err as Error).message });
       throw err;
     }
-  }, [selectedProjectId, selectedModuleId, selectedTaskId, selectedMinitaskId, data?.objects, positionOverrides, existingPositions, newEntityMeta, savePositions]);
+  }, [selectedProjectId, selectedModuleId, selectedTaskId, selectedMinitaskId, data?.objects, positionOverrides, existingPositions, newEntityMeta, savePositions, queryClient, zoomLevel]);
 
   const handleDoneEdit = useCallback(async () => {
     try {
@@ -450,6 +565,34 @@ export default function GalacticPage() {
     }
     setSelectedMinitaskId(undefined);
   }, [isEditMode, performSave]);
+
+  /** Back from minitask: always go to parent system (task/module/solar) based on minitask's actual parent, not navigation history */
+  const handleBackFromMinitask = useCallback(
+    async (minitask: CanvasObject) => {
+      if (isEditMode) {
+        try {
+          await performSave();
+        } catch {
+          return;
+        }
+      }
+      const taskId = (minitask.metadata?.taskId ?? (minitask as any).task_id) as string | undefined;
+      const moduleId = (minitask.metadata?.moduleId ?? (minitask as any).module_id) as string | undefined;
+      const projectId = (minitask.metadata?.projectId ?? (minitask as any).project_id) as string | undefined;
+      setSelectedMinitaskId(undefined);
+      if (taskId && moduleId) {
+        setSelectedTaskId(taskId);
+        setSelectedModuleId(moduleId);
+      } else if (moduleId) {
+        setSelectedTaskId(undefined);
+        setSelectedModuleId(moduleId);
+      } else if (projectId) {
+        setSelectedTaskId(undefined);
+        setSelectedModuleId(undefined);
+      }
+    },
+    [isEditMode, performSave]
+  );
 
   // Save before portal navigation so position overrides (e.g. in asteroid system) are not lost
   const handlePortalClick = useCallback(
@@ -1177,15 +1320,15 @@ export default function GalacticPage() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-        {/* Back Button (if in asteroid zoom) */}
+        {/* Back Button (if in asteroid zoom) - always go to parent system (task/module/solar) */}
         {selectedMinitaskId && (() => {
           const currentMinitask = objectsToRender.find((o) => o.type === 'minitask' && o.id === selectedMinitaskId);
           const isProjectLevelMinitask = currentMinitask?.metadata?.projectId && !currentMinitask?.metadata?.moduleId && !currentMinitask?.metadata?.taskId;
-          const backHandler = isProjectLevelMinitask ? handleBackToSolar : handleBackToTask;
-          const backLabel = isProjectLevelMinitask ? '← Back to Solar System' : '← Back';
+          const isModuleLevelMinitask = currentMinitask?.metadata?.moduleId && !currentMinitask?.metadata?.taskId;
+          const backLabel = isProjectLevelMinitask ? '← Back to Solar System' : isModuleLevelMinitask ? '← Back to Module System' : '← Back to Task';
           return (
             <button
-              onClick={() => backHandler()}
+              onClick={() => currentMinitask ? handleBackFromMinitask(currentMinitask) : handleBackToTask()}
               onMouseEnter={() => setHoveredButton('back-task')}
               onMouseLeave={() => setHoveredButton(null)}
               style={{
@@ -1774,7 +1917,14 @@ export default function GalacticPage() {
         <SunDetailCard
           projectId={projectDetailId}
           onClose={() => setProjectDetailId(null)}
-          onZoomIn={(moduleId) => {
+          onZoomIn={async (moduleId) => {
+            if (isEditMode) {
+              try {
+                await performSave();
+              } catch {
+                return;
+              }
+            }
             setProjectDetailId(null);
             setSelectedModuleId(moduleId);
           }}
@@ -1786,7 +1936,14 @@ export default function GalacticPage() {
         <PlanetDetailCard
           moduleId={planetDetailId}
           onClose={() => setPlanetDetailId(null)}
-          onZoomIn={() => {
+          onZoomIn={async () => {
+            if (isEditMode) {
+              try {
+                await performSave();
+              } catch {
+                return;
+              }
+            }
             setPlanetDetailId(null);
             setSelectedModuleId(planetDetailId);
           }}
@@ -1798,7 +1955,14 @@ export default function GalacticPage() {
         <MoonDetailCard
           taskId={moonDetailId}
           onClose={() => setMoonDetailId(null)}
-          onZoomIn={(moduleId) => {
+          onZoomIn={async (moduleId) => {
+            if (isEditMode) {
+              try {
+                await performSave();
+              } catch {
+                return;
+              }
+            }
             const taskIdToSelect = moonDetailId;
             setMoonDetailId(null);
             setSelectedModuleId(moduleId);
@@ -1814,7 +1978,14 @@ export default function GalacticPage() {
           onClose={() => setAsteroidDetailId(null)}
           onZoomIn={
             selectedTaskId || selectedModuleId || (selectedProjectId && objectsToRender.some((o) => o.type === 'module'))
-              ? () => {
+              ? async () => {
+                  if (isEditMode) {
+                    try {
+                      await performSave();
+                    } catch {
+                      return;
+                    }
+                  }
                   setAsteroidDetailId(null);
                   if (!selectedModuleId && selectedProjectId) {
                     const asteroid = objectsToRender.find((o) => o.type === 'minitask' && o.id === asteroidDetailId);

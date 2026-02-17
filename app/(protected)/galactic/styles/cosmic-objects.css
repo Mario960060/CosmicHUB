@@ -1713,6 +1713,13 @@
 }
 .moon.sm .moon-crater { display: none; }
 
+/* Solar System: taski (księżyce) 3× większe niż sm */
+.moon.solar-sm {
+  width: 54px;
+  height: 54px;
+}
+.moon.solar-sm .moon-crater { display: none; }
+
 /* Rocky Moon - fioletowy */
 .moon.rocky {
   background: radial-gradient(circle at 35% 35%,
@@ -1871,7 +1878,7 @@
 
 .asteroid.md .asteroid-crater { display: none; }
 
-/* Extra-small asteroid (minitaski przy taskach w Solar System) */
+/* Extra-small asteroid (minitaski przy taskach w module view) */
 .asteroid.xs {
   width: 12px;
   height: 12px;
@@ -1880,6 +1887,32 @@
 .asteroid.xs .asteroid-crater { display: none; }
 .asteroid.xs .asteroid-labels-inset { display: none; }
 .asteroid.xs .object-stars-crown { display: none; }
+
+/* Solar System: minitaski 2× większe niż xs */
+.asteroid.solar-xs {
+  width: 24px;
+  height: 24px;
+}
+
+.asteroid.solar-xs .asteroid-crater { display: none; }
+.asteroid.solar-xs .asteroid-labels-inset { display: none; }
+.asteroid.solar-xs .object-stars-crown { display: none; }
+
+/* Solar System: minitaski przypisane do projektu – 70% planety (100px → 70px) */
+.asteroid.solar-project {
+  width: 70px;
+  height: 70px;
+}
+
+.asteroid.solar-project .asteroid-crater { display: none; }
+
+/* Solar System: minitaski na poziomie modułu – ~30% mniejsze niż taski (54px → 38px) */
+.asteroid.solar-sm {
+  width: 38px;
+  height: 38px;
+}
+
+.asteroid.solar-sm .asteroid-crater { display: none; }
 
 /* Task-zoom: powiększone moon (task) i asteroidy (minitaski) o ~125% (2× 50%) */
 #galaxy-canvas.task-zoom-view .moon:not(.sm) {
@@ -1927,6 +1960,20 @@
   color: #ef4444 !important;
   text-shadow: 0 0 8px rgba(239, 68, 68, 0.95), 0 2px 4px rgba(0,0,0,0.3);
   white-space: nowrap;
+}
+
+/* Minitaski przypisane do tasków: biała czcionka, większa (+50%) */
+.asteroid.asteroid-task-labels .asteroid-name-label,
+.asteroid.asteroid-task-labels .asteroid-deadline-label {
+  color: rgba(255, 255, 255, 0.95) !important;
+  font-size: 18px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.asteroid.asteroid-task-labels.sm .asteroid-name-label,
+.asteroid.asteroid-task-labels.sm .asteroid-deadline-label,
+.asteroid.asteroid-task-labels.md .asteroid-name-label,
+.asteroid.asteroid-task-labels.md .asteroid-deadline-label {
+  font-size: 6px;
 }
 
 /* =============== PORTAL / GALAXY VORTEX =============== */

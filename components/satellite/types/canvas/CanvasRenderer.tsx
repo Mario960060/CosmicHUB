@@ -35,7 +35,7 @@ interface CanvasRendererProps {
   onBlockPointerDown: (e: React.PointerEvent, target: 'body' | PortSide, blockId: string) => void;
   onBlockDoubleClick: (blockId: string) => void;
   onBlockTextChange: (blockId: string, text: string) => void;
-  onBlockResizeStart: (blockId: string, e: React.PointerEvent) => void;
+  onBlockResizeStart: (blockId: string, handle: string, e: React.PointerEvent) => void;
   onConnectionClick: (connId: string) => void;
   onConnectionContextMenu: (connId: string, e: React.MouseEvent) => void;
   onBackgroundPointerDown: (e: React.PointerEvent) => void;
@@ -202,7 +202,7 @@ export function CanvasRenderer({
             onPointerDown={(e, target) => onBlockPointerDown(e, target, block.id)}
             onDoubleClick={() => onBlockDoubleClick(block.id)}
             onTextChange={(text) => onBlockTextChange(block.id, text)}
-            onResizeStart={(e) => onBlockResizeStart(block.id, e)}
+            onResizeStart={(handle, e) => onBlockResizeStart(block.id, handle, e)}
             onContextMenu={onBlockContextMenu ? (e) => onBlockContextMenu(block.id, e) : undefined}
           />
         ))}

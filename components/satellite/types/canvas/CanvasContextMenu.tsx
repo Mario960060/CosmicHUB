@@ -1,6 +1,7 @@
 'use client';
 
-import type { BlockColor } from './useCanvasState';
+import { useRef, useLayoutEffect, useState } from 'react';
+import type { BlockColor, BlockTextAlign } from './useCanvasState';
 import type {
   CanvasShapeData,
   ShapeStrokeColor,
@@ -11,6 +12,80 @@ import type {
 import { SHAPE_STROKE_COLOR_SWATCHES } from './canvas-types';
 
 const BLOCK_COLORS: BlockColor[] = ['neutral', 'cyan', 'rose', 'indigo', 'teal', 'green', 'amber', 'purple', 'orange'];
+
+const PAD = 8;
+
+function clampPosition(
+  x: number,
+  y: number,
+  rect: DOMRect
+): { left?: number; right?: number; top: number } {
+  const vw = typeof window !== 'undefined' ? window.visualViewport?.width ?? window.innerWidth : 0;
+  const vh = typeof window !== 'undefined' ? window.visualViewport?.height ?? window.innerHeight : 0;
+  let left: number | undefined = x;
+  let right: number | undefined;
+  let top = y;
+  if (rect.width > 0 && rect.height > 0) {
+    if (rect.right > vw - PAD) {
+      left = undefined;
+      right = PAD;
+    } else if (rect.left < PAD) {
+      left = PAD;
+      right = undefined;
+    }
+    if (rect.bottom > vh - PAD) top = vh - rect.height - PAD;
+    if (rect.top < PAD) top = PAD;
+  }
+  return { left, right, top };
+}
+
+/** Wrapper that keeps context menu fully visible on screen. Uses state so React doesn't overwrite adjusted position. */
+function PositionedContextMenu({
+  x,
+  y,
+  children,
+  style,
+  ...rest
+}: {
+  x: number;
+  y: number;
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+  [k: string]: unknown;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left?: number; right?: number; top: number }>({ left: x, top: y });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const adjust = () => {
+      const rect = el.getBoundingClientRect();
+      setPos(clampPosition(x, y, rect));
+    };
+    adjust();
+    const raf = requestAnimationFrame(() => {
+      adjust();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [x, y]);
+  return (
+    <div
+      ref={ref}
+      data-context-menu
+      style={{
+        position: 'fixed',
+        ...(pos.left !== undefined ? { left: pos.left } : {}),
+        ...(pos.right !== undefined ? { right: pos.right } : {}),
+        top: pos.top,
+        ...style,
+        zIndex: 10001,
+      }}
+      {...rest}
+    >
+      {children}
+    </div>
+  );
+}
 
 const COLOR_SWATCHES: Record<BlockColor, string> = {
   neutral: 'rgba(255,255,255,0.15)',
@@ -29,10 +104,12 @@ interface BlockContextMenuProps {
   y: number;
   blockColor: BlockColor;
   blockFontColor: BlockColor | null;
+  blockTextAlign: BlockTextAlign;
   onEditText: () => void;
   onColorChange: (color: BlockColor) => void;
   onFontColorChange: (color: BlockColor | null) => void;
   onFontSize: (size: 'sm' | 'md' | 'lg') => void;
+  onTextAlign: (align: BlockTextAlign) => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -43,10 +120,12 @@ export function BlockContextMenu({
   y,
   blockColor,
   blockFontColor,
+  blockTextAlign,
   onEditText,
   onColorChange,
   onFontColorChange,
   onFontSize,
+  onTextAlign,
   onDuplicate,
   onDelete,
   onClose,
@@ -54,12 +133,10 @@ export function BlockContextMenu({
   const fontColorOptions = BLOCK_COLORS.filter((c) => c !== blockColor);
 
   return (
-    <div
-      data-context-menu
+    <PositionedContextMenu
+      x={x}
+      y={y}
       style={{
-        position: 'fixed',
-        left: x,
-        top: y,
         minWidth: 170,
         background: '#0c1829',
         border: '1px solid rgba(249,115,22,0.25)',
@@ -68,7 +145,7 @@ export function BlockContextMenu({
         zIndex: 1000,
         boxShadow: '0 8px 30px rgba(0,0,0,0.5), 0 0 20px rgba(249,115,22,0.04)',
       }}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e: React.MouseEvent) => e.stopPropagation()}
     >
       <CtxItem icon="Edit text" onClick={onEditText} shortcut="Dbl-click" />
       <div style={{ padding: '6px 12px' }}>
@@ -124,11 +201,34 @@ export function BlockContextMenu({
       <CtxItem icon="Font size S" onClick={() => onFontSize('sm')} />
       <CtxItem icon="Font size M" onClick={() => onFontSize('md')} />
       <CtxItem icon="Font size L" onClick={() => onFontSize('lg')} />
+      <div style={{ padding: '6px 12px' }}>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 4 }}>Align text</div>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {(['left', 'center', 'right'] as BlockTextAlign[]).map((align) => (
+            <div
+              key={align}
+              onClick={() => onTextAlign(align)}
+              style={{
+                padding: '4px 10px',
+                fontSize: 11,
+                fontFamily: 'Rajdhani, sans-serif',
+                fontWeight: 600,
+                color: blockTextAlign === align ? '#f97316' : 'rgba(255,255,255,0.5)',
+                background: blockTextAlign === align ? 'rgba(249,115,22,0.15)' : 'transparent',
+                borderRadius: 6,
+                cursor: 'pointer',
+              }}
+            >
+              {align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'}
+            </div>
+          ))}
+        </div>
+      </div>
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
       <CtxItem icon="Duplicate" onClick={onDuplicate} shortcut="Ctrl+D" />
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
       <CtxItem icon="Delete" onClick={onDelete} shortcut="Del" danger />
-    </div>
+    </PositionedContextMenu>
   );
 }
 
@@ -142,12 +242,10 @@ interface LineContextMenuProps {
 
 export function LineContextMenu({ x, y, onEditLabel, onDelete, onClose }: LineContextMenuProps) {
   return (
-    <div
-      data-context-menu
+    <PositionedContextMenu
+      x={x}
+      y={y}
       style={{
-        position: 'fixed',
-        left: x,
-        top: y,
         minWidth: 150,
         background: '#0c1829',
         border: '1px solid rgba(249,115,22,0.25)',
@@ -156,12 +254,12 @@ export function LineContextMenu({ x, y, onEditLabel, onDelete, onClose }: LineCo
         zIndex: 1000,
         boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
       }}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e: React.MouseEvent) => e.stopPropagation()}
     >
       <CtxItem icon="Edit label" onClick={onEditLabel} />
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
       <CtxItem icon="Delete" onClick={onDelete} danger />
-    </div>
+    </PositionedContextMenu>
   );
 }
 
@@ -233,12 +331,10 @@ export function ShapeContextMenu({
   const hasFill = shape.type !== 'line' && shape.type !== 'arrow' && shape.type !== 'freehand';
 
   return (
-    <div
-      data-context-menu
+    <PositionedContextMenu
+      x={x}
+      y={y}
       style={{
-        position: 'fixed',
-        left: x,
-        top: y,
         minWidth: 180,
         maxWidth: 220,
         background: '#0c1829',
@@ -248,7 +344,7 @@ export function ShapeContextMenu({
         zIndex: 1000,
         boxShadow: '0 8px 30px rgba(0,0,0,0.5), 0 0 20px rgba(249,115,22,0.04)',
       }}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e: React.MouseEvent) => e.stopPropagation()}
     >
       <div style={{ padding: '6px 12px' }}>
         <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 4 }}>Stroke color</div>
@@ -447,7 +543,7 @@ export function ShapeContextMenu({
       <CtxItem icon="Send to back" onClick={onSendToBack} />
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
       <CtxItem icon="Delete" onClick={onDelete} shortcut="Del" danger />
-    </div>
+    </PositionedContextMenu>
   );
 }
 
@@ -463,12 +559,10 @@ export function CanvasContextMenu({
   onClose,
 }: CanvasContextMenuProps) {
   return (
-    <div
-      data-context-menu
+    <PositionedContextMenu
+      x={x}
+      y={y}
       style={{
-        position: 'fixed',
-        left: x,
-        top: y,
         minWidth: 170,
         background: '#0c1829',
         border: '1px solid rgba(249,115,22,0.25)',
@@ -477,7 +571,7 @@ export function CanvasContextMenu({
         zIndex: 1000,
         boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
       }}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e: React.MouseEvent) => e.stopPropagation()}
     >
       <CtxItem icon="New block here" onClick={onAddBlock} shortcut="B" />
       <CtxItem icon="Paste" onClick={onPaste} shortcut="Ctrl+V" disabled={!canPaste} />
@@ -486,7 +580,7 @@ export function CanvasContextMenu({
       <CtxItem icon="Reset view" onClick={onResetView} shortcut="Ctrl+0" />
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
       <CtxItem icon="Toggle grid" onClick={onGridToggle} shortcut="G" />
-    </div>
+    </PositionedContextMenu>
   );
 }
 

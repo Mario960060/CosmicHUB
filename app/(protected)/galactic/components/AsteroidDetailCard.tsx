@@ -282,7 +282,7 @@ export function AsteroidDetailCard({ minitaskId, onClose, onZoomIn }: AsteroidDe
         >
           {onZoomIn && (
             <button
-              onClick={(e) => { e.stopPropagation(); onClose(); onZoomIn(); }}
+              onClick={async (e) => { e.stopPropagation(); await onZoomIn(); onClose(); }}
               style={{
                 display: 'flex',
                 alignItems: 'center',

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { User, ChevronDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -29,7 +30,9 @@ import type { PortSide } from './canvas-utils';
 const DROP_MAGNET_DIST = 70;
 
 /** Distance within which block edges snap to align with other blocks (Obsidian-style) */
-const SNAP_THRESHOLD = 8;
+const SNAP_THRESHOLD = 5;
+/** Once snapped, release when element would be further than this from the guide (easier to break free) */
+const SNAP_RELEASE = 4;
 import type { CanvasItem } from './canvas-types';
 import type { CanvasState } from './useCanvasState';
 
@@ -149,6 +152,7 @@ export function CanvasEditorPopup({
   } | null>(null);
   const boxRef = useRef<{ startX: number; startY: number } | null>(null);
   const pannedThisSessionRef = useRef(false);
+  const snapGuideRef = useRef<{ vertical?: number; horizontal?: number }>({});
   const lastPointerRef = useRef<{ clientX: number; clientY: number }>({ clientX: 0, clientY: 0 });
 
   const screenToCanvasFn = useCallback(
@@ -341,18 +345,50 @@ export function CanvasEditorPopup({
 
   // === BLOCK RESIZE ===
   const handleBlockResizeStart = useCallback(
-    (blockId: string, e: React.PointerEvent) => {
+    (blockId: string, handle: string, e: React.PointerEvent) => {
       e.stopPropagation();
       const block = state.blocks.find((b) => b.id === blockId);
       if (!block) return;
-      const startX = e.clientX;
-      const startY = e.clientY;
+      const startClientX = e.clientX;
+      const startClientY = e.clientY;
+      const startX = block.x;
+      const startY = block.y;
       const startW = block.width;
       const startH = block.height;
+      const zoom = state.viewport.zoom;
       const onMove = (ev: PointerEvent) => {
-        const dx = (ev.clientX - startX) / state.viewport.zoom;
-        const dy = (ev.clientY - startY) / state.viewport.zoom;
-        canvasState.resizeBlock(blockId, startW + dx, startH + dy);
+        const dx = (ev.clientX - startClientX) / zoom;
+        const dy = (ev.clientY - startClientY) / zoom;
+        let updates: Partial<{ x: number; y: number; width: number; height: number }> = {};
+        switch (handle) {
+          case 'se':
+            updates = { width: startW + dx, height: startH + dy };
+            break;
+          case 's':
+            updates = { height: startH + dy };
+            break;
+          case 'e':
+            updates = { width: startW + dx };
+            break;
+          case 'sw':
+            updates = { x: startX + dx, width: startW - dx, height: startH + dy };
+            break;
+          case 'w':
+            updates = { x: startX + dx, width: startW - dx };
+            break;
+          case 'n':
+            updates = { y: startY + dy, height: startH - dy };
+            break;
+          case 'nw':
+            updates = { x: startX + dx, y: startY + dy, width: startW - dx, height: startH - dy };
+            break;
+          case 'ne':
+            updates = { y: startY + dy, width: startW + dx, height: startH - dy };
+            break;
+          default:
+            return;
+        }
+        canvasState.resizeBlock(blockId, updates);
       };
       const onUp = () => {
         window.removeEventListener('pointermove', onMove);
@@ -533,43 +569,46 @@ export function CanvasEditorPopup({
           const newY = bbox.y + dy;
           const newRight = newX + bbox.width;
           const newBottom = newY + bbox.height;
+          const vTh = (g: number) => (snapGuideRef.current.vertical === g ? SNAP_RELEASE : SNAP_THRESHOLD);
+          const hTh = (g: number) => (snapGuideRef.current.horizontal === g ? SNAP_RELEASE : SNAP_THRESHOLD);
 
           for (const b of othersBlocks) {
             const bRight = b.x + b.width;
             const bBottom = b.y + b.height;
-            if (Math.abs(newX - b.x) < SNAP_THRESHOLD) { dx = b.x - bbox.x; guideVertical = b.x; break; }
-            if (Math.abs(newX - bRight) < SNAP_THRESHOLD) { dx = bRight - bbox.x; guideVertical = bRight; break; }
-            if (Math.abs(newRight - b.x) < SNAP_THRESHOLD) { dx = b.x - bbox.x - bbox.width; guideVertical = b.x; break; }
-            if (Math.abs(newRight - bRight) < SNAP_THRESHOLD) { dx = bRight - bbox.x - bbox.width; guideVertical = bRight; break; }
+            if (Math.abs(newX - b.x) < vTh(b.x)) { dx = b.x - bbox.x; guideVertical = b.x; snapGuideRef.current.vertical = b.x; break; }
+            if (Math.abs(newX - bRight) < vTh(bRight)) { dx = bRight - bbox.x; guideVertical = bRight; snapGuideRef.current.vertical = bRight; break; }
+            if (Math.abs(newRight - b.x) < vTh(b.x)) { dx = b.x - bbox.x - bbox.width; guideVertical = b.x; snapGuideRef.current.vertical = b.x; break; }
+            if (Math.abs(newRight - bRight) < vTh(bRight)) { dx = bRight - bbox.x - bbox.width; guideVertical = bRight; snapGuideRef.current.vertical = bRight; break; }
           }
           if (guideVertical == null) {
             for (const s of othersShapes) {
               const sb = getShapeBoundingBox(s);
               const sRight = sb.x + sb.width;
-              const sBottom = sb.y + sb.height;
-              if (Math.abs(newX - sb.x) < SNAP_THRESHOLD) { dx = sb.x - bbox.x; guideVertical = sb.x; break; }
-              if (Math.abs(newX - sRight) < SNAP_THRESHOLD) { dx = sRight - bbox.x; guideVertical = sRight; break; }
-              if (Math.abs(newRight - sb.x) < SNAP_THRESHOLD) { dx = sb.x - bbox.x - bbox.width; guideVertical = sb.x; break; }
-              if (Math.abs(newRight - sRight) < SNAP_THRESHOLD) { dx = sRight - bbox.x - bbox.width; guideVertical = sRight; break; }
+              if (Math.abs(newX - sb.x) < vTh(sb.x)) { dx = sb.x - bbox.x; guideVertical = sb.x; snapGuideRef.current.vertical = sb.x; break; }
+              if (Math.abs(newX - sRight) < vTh(sRight)) { dx = sRight - bbox.x; guideVertical = sRight; snapGuideRef.current.vertical = sRight; break; }
+              if (Math.abs(newRight - sb.x) < vTh(sb.x)) { dx = sb.x - bbox.x - bbox.width; guideVertical = sb.x; snapGuideRef.current.vertical = sb.x; break; }
+              if (Math.abs(newRight - sRight) < vTh(sRight)) { dx = sRight - bbox.x - bbox.width; guideVertical = sRight; snapGuideRef.current.vertical = sRight; break; }
             }
           }
+          if (guideVertical == null) snapGuideRef.current.vertical = undefined;
           for (const b of othersBlocks) {
             const bBottom = b.y + b.height;
-            if (Math.abs(newY - b.y) < SNAP_THRESHOLD) { dy = b.y - bbox.y; guideHorizontal = b.y; break; }
-            if (Math.abs(newY - bBottom) < SNAP_THRESHOLD) { dy = bBottom - bbox.y; guideHorizontal = bBottom; break; }
-            if (Math.abs(newBottom - b.y) < SNAP_THRESHOLD) { dy = b.y - bbox.y - bbox.height; guideHorizontal = b.y; break; }
-            if (Math.abs(newBottom - bBottom) < SNAP_THRESHOLD) { dy = bBottom - bbox.y - bbox.height; guideHorizontal = bBottom; break; }
+            if (Math.abs(newY - b.y) < hTh(b.y)) { dy = b.y - bbox.y; guideHorizontal = b.y; snapGuideRef.current.horizontal = b.y; break; }
+            if (Math.abs(newY - bBottom) < hTh(bBottom)) { dy = bBottom - bbox.y; guideHorizontal = bBottom; snapGuideRef.current.horizontal = bBottom; break; }
+            if (Math.abs(newBottom - b.y) < hTh(b.y)) { dy = b.y - bbox.y - bbox.height; guideHorizontal = b.y; snapGuideRef.current.horizontal = b.y; break; }
+            if (Math.abs(newBottom - bBottom) < hTh(bBottom)) { dy = bBottom - bbox.y - bbox.height; guideHorizontal = bBottom; snapGuideRef.current.horizontal = bBottom; break; }
           }
           if (guideHorizontal == null) {
             for (const s of othersShapes) {
               const sb = getShapeBoundingBox(s);
               const sBottom = sb.y + sb.height;
-              if (Math.abs(newY - sb.y) < SNAP_THRESHOLD) { dy = sb.y - bbox.y; guideHorizontal = sb.y; break; }
-              if (Math.abs(newY - sBottom) < SNAP_THRESHOLD) { dy = sBottom - bbox.y; guideHorizontal = sBottom; break; }
-              if (Math.abs(newBottom - sb.y) < SNAP_THRESHOLD) { dy = sb.y - bbox.y - bbox.height; guideHorizontal = sb.y; break; }
-              if (Math.abs(newBottom - sBottom) < SNAP_THRESHOLD) { dy = sBottom - bbox.y - bbox.height; guideHorizontal = sBottom; break; }
+              if (Math.abs(newY - sb.y) < hTh(sb.y)) { dy = sb.y - bbox.y; guideHorizontal = sb.y; snapGuideRef.current.horizontal = sb.y; break; }
+              if (Math.abs(newY - sBottom) < hTh(sBottom)) { dy = sBottom - bbox.y; guideHorizontal = sBottom; snapGuideRef.current.horizontal = sBottom; break; }
+              if (Math.abs(newBottom - sb.y) < hTh(sb.y)) { dy = sb.y - bbox.y - bbox.height; guideHorizontal = sb.y; snapGuideRef.current.horizontal = sb.y; break; }
+              if (Math.abs(newBottom - sBottom) < hTh(sBottom)) { dy = sBottom - bbox.y - bbox.height; guideHorizontal = sBottom; snapGuideRef.current.horizontal = sBottom; break; }
             }
           }
+          if (guideHorizontal == null) snapGuideRef.current.horizontal = undefined;
           setSnapGuides(guideVertical != null || guideHorizontal != null ? { horizontal: guideHorizontal, vertical: guideVertical } : null);
         } else {
           setSnapGuides(null);
@@ -601,22 +640,26 @@ export function CanvasEditorPopup({
           const newY = primary.y + dy;
           const newRight = newX + primary.width;
           const newBottom = newY + primary.height;
+          const vTh = (g: number) => (snapGuideRef.current.vertical === g ? SNAP_RELEASE : SNAP_THRESHOLD);
+          const hTh = (g: number) => (snapGuideRef.current.horizontal === g ? SNAP_RELEASE : SNAP_THRESHOLD);
 
           for (const b of others) {
             const bRight = b.x + b.width;
             const bBottom = b.y + b.height;
-            if (Math.abs(newX - b.x) < SNAP_THRESHOLD) { dx = b.x - primary.x; guideVertical = b.x; break; }
-            if (Math.abs(newX - bRight) < SNAP_THRESHOLD) { dx = bRight - primary.x; guideVertical = bRight; break; }
-            if (Math.abs(newRight - b.x) < SNAP_THRESHOLD) { dx = b.x - primary.x - primary.width; guideVertical = b.x; break; }
-            if (Math.abs(newRight - bRight) < SNAP_THRESHOLD) { dx = bRight - primary.x - primary.width; guideVertical = bRight; break; }
+            if (Math.abs(newX - b.x) < vTh(b.x)) { dx = b.x - primary.x; guideVertical = b.x; snapGuideRef.current.vertical = b.x; break; }
+            if (Math.abs(newX - bRight) < vTh(bRight)) { dx = bRight - primary.x; guideVertical = bRight; snapGuideRef.current.vertical = bRight; break; }
+            if (Math.abs(newRight - b.x) < vTh(b.x)) { dx = b.x - primary.x - primary.width; guideVertical = b.x; snapGuideRef.current.vertical = b.x; break; }
+            if (Math.abs(newRight - bRight) < vTh(bRight)) { dx = bRight - primary.x - primary.width; guideVertical = bRight; snapGuideRef.current.vertical = bRight; break; }
           }
+          if (guideVertical == null) snapGuideRef.current.vertical = undefined;
           for (const b of others) {
             const bBottom = b.y + b.height;
-            if (Math.abs(newY - b.y) < SNAP_THRESHOLD) { dy = b.y - primary.y; guideHorizontal = b.y; break; }
-            if (Math.abs(newY - bBottom) < SNAP_THRESHOLD) { dy = bBottom - primary.y; guideHorizontal = bBottom; break; }
-            if (Math.abs(newBottom - b.y) < SNAP_THRESHOLD) { dy = b.y - primary.y - primary.height; guideHorizontal = b.y; break; }
-            if (Math.abs(newBottom - bBottom) < SNAP_THRESHOLD) { dy = bBottom - primary.y - primary.height; guideHorizontal = bBottom; break; }
+            if (Math.abs(newY - b.y) < hTh(b.y)) { dy = b.y - primary.y; guideHorizontal = b.y; snapGuideRef.current.horizontal = b.y; break; }
+            if (Math.abs(newY - bBottom) < hTh(bBottom)) { dy = bBottom - primary.y; guideHorizontal = bBottom; snapGuideRef.current.horizontal = bBottom; break; }
+            if (Math.abs(newBottom - b.y) < hTh(b.y)) { dy = b.y - primary.y - primary.height; guideHorizontal = b.y; snapGuideRef.current.horizontal = b.y; break; }
+            if (Math.abs(newBottom - bBottom) < hTh(bBottom)) { dy = bBottom - primary.y - primary.height; guideHorizontal = bBottom; snapGuideRef.current.horizontal = bBottom; break; }
           }
+          if (guideHorizontal == null) snapGuideRef.current.horizontal = undefined;
           setSnapGuides(guideVertical != null || guideHorizontal != null ? { horizontal: guideHorizontal, vertical: guideVertical } : null);
         } else {
           setSnapGuides(null);
@@ -672,6 +715,7 @@ export function CanvasEditorPopup({
       shapeMoveRef.current = null;
       rotationRef.current = null;
       resizeRef.current = null;
+      snapGuideRef.current = {};
       setSnapGuides(null);
     },
     [connectionDrag, connectionEndDrag, state.viewport, state.blocks, canvasState, drawingTools]
@@ -709,6 +753,7 @@ export function CanvasEditorPopup({
       shapeMoveRef.current = null;
       rotationRef.current = null;
       resizeRef.current = null;
+      snapGuideRef.current = {};
       boxRef.current = null;
       setBoxSelection(null);
       setSnapGuides(null);
@@ -1007,7 +1052,7 @@ export function CanvasEditorPopup({
               </button>
               {assignOpen && (
                 <div
-                  className="scrollbar-cosmic"
+                  className="scrollbar-cosmic scrollbar-cosmic-orange"
                   style={{
                     position: 'absolute',
                     top: '100%',
@@ -1266,30 +1311,33 @@ export function CanvasEditorPopup({
         </div>
       </div>
 
-      {/* Context menus - close on window click (like Galaktyka, no overlay so first click reaches canvas) */}
-      {contextMenu?.type === 'block' && (() => {
+      {/* Context menus - portaled to body so position:fixed works correctly and they stay on screen */}
+      {contextMenu?.type === 'block' && typeof document !== 'undefined' && (() => {
         const block = state.blocks.find((b) => b.id === contextMenu.blockId);
         if (!block) return null;
-        return (
+        return createPortal(
           <BlockContextMenu
             x={contextMenu.x}
             y={contextMenu.y}
             blockColor={block.color}
             blockFontColor={block.fontColor}
+            blockTextAlign={block.textAlign}
             onEditText={() => { canvasState.setEditingBlockId(contextMenu.blockId); setContextMenu(null); }}
             onColorChange={(c) => { canvasState.updateBlockColor(contextMenu.blockId, c); setContextMenu(null); }}
             onFontColorChange={(c) => { canvasState.updateBlockFontColor(contextMenu.blockId, c); setContextMenu(null); }}
             onFontSize={(s) => { canvasState.updateBlockFontSize(contextMenu.blockId, s); setContextMenu(null); }}
+            onTextAlign={(a) => { canvasState.updateBlockTextAlign(contextMenu.blockId, a); setContextMenu(null); }}
             onDuplicate={() => { canvasState.duplicate(); setContextMenu(null); }}
             onDelete={() => { setPendingDelete({ type: 'block', blockId: contextMenu.blockId }); setContextMenu(null); }}
             onClose={() => setContextMenu(null)}
-          />
+          />,
+          document.body
         );
       })()}
-      {contextMenu?.type === 'shape' && (() => {
+      {contextMenu?.type === 'shape' && typeof document !== 'undefined' && (() => {
         const shape = state.shapes.find((s) => s.id === contextMenu.shapeId);
         if (!shape) return null;
-        return (
+        return createPortal(
           <ShapeContextMenu
             x={contextMenu.x}
             y={contextMenu.y}
@@ -1306,10 +1354,11 @@ export function CanvasEditorPopup({
             onSendToBack={() => { canvasState.sendShapeToBack(contextMenu.shapeId); setContextMenu(null); }}
             onDelete={() => { setPendingDelete({ type: 'shape', shapeId: contextMenu.shapeId }); setContextMenu(null); }}
             onClose={() => setContextMenu(null)}
-          />
+          />,
+          document.body
         );
       })()}
-      {contextMenu?.type === 'line' && (
+      {contextMenu?.type === 'line' && typeof document !== 'undefined' && createPortal(
         <LineContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
@@ -1319,7 +1368,8 @@ export function CanvasEditorPopup({
           }}
           onDelete={() => { setPendingDelete({ type: 'line', connId: contextMenu.connId }); setContextMenu(null); }}
           onClose={() => setContextMenu(null)}
-        />
+        />,
+        document.body
       )}
       {editLabelConnId && (() => {
         const conn = state.connections.find((c) => c.id === editLabelConnId);
@@ -1337,7 +1387,7 @@ export function CanvasEditorPopup({
           />
         );
       })()}
-      {contextMenu?.type === 'canvas' && (
+      {contextMenu?.type === 'canvas' && typeof document !== 'undefined' && createPortal(
         <CanvasContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
@@ -1362,7 +1412,8 @@ export function CanvasEditorPopup({
           onGridToggle={() => { canvasState.setGridEnabled(!state.gridEnabled); setContextMenu(null); }}
           canPaste={canvasState.copiedBlocksCount > 0}
           onClose={() => setContextMenu(null)}
-        />
+        />,
+        document.body
       )}
       {shortcutsOpen && (
         <CanvasShortcutsPopup onClose={() => setShortcutsOpen(false)} />

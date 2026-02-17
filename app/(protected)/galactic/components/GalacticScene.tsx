@@ -147,8 +147,29 @@ export function GalacticScene({
   const [scale, setScale] = useState(1);
   const [dragging, setDragging] = useState<string | null>(null);
 
-  const getPosition = (obj: CanvasObject) =>
-    positionOverrides?.get(obj.id) ?? obj.position;
+  const getPosition = (obj: CanvasObject): { x: number; y: number } => {
+    const override = positionOverrides?.get(obj.id);
+    if (override) return override;
+    /* W solar-system pozycje z transformera są już absolutne – nie stosujemy kaskady.
+       Przy dragu rodzica, dzieci są przesuwane bezpośrednio w handleObjectPointerMove. */
+    if (viewType === 'solar-system') return obj.position;
+    const parentId = (obj.type === 'task' && obj.metadata?.moduleId) ||
+      (obj.type === 'minitask' && (obj.metadata?.taskId || obj.metadata?.moduleId)) ||
+      (obj.type === 'subtask' && (obj.metadata?.minitaskId || obj.metadata?.taskId));
+    if (parentId) {
+      const parent = objects.find((o) => o.id === parentId);
+      if (parent) {
+        const parentEffectivePos = getPosition(parent);
+        const offsetX = obj.position.x - parent.position.x;
+        const offsetY = obj.position.y - parent.position.y;
+        return {
+          x: parentEffectivePos.x + offsetX,
+          y: parentEffectivePos.y + offsetY,
+        };
+      }
+    }
+    return obj.position;
+  };
 
   // Center and scale canvas to fit viewport
   useEffect(() => {
@@ -228,6 +249,21 @@ export function GalacticScene({
   const pos = (o: CanvasObject) => getPosition(o);
   const isSelected = (id: string) => selectedObjectIds?.has(id) ?? false;
 
+  /* W solar-system pozycje są absolutne – przy dragu rodzica musimy przesunąć dzieci bezpośrednio */
+  const getChildrenIds = (parentId: string): string[] => {
+    const children: string[] = [];
+    for (const o of objects) {
+      const pid = (o.type === 'task' && o.metadata?.moduleId) ||
+        (o.type === 'minitask' && (o.metadata?.taskId || o.metadata?.moduleId)) ||
+        (o.type === 'subtask' && (o.metadata?.minitaskId || o.metadata?.taskId));
+      if (pid === parentId) {
+        children.push(o.id);
+        children.push(...getChildrenIds(o.id));
+      }
+    }
+    return children;
+  };
+
   const handleObjectPointerDown = (obj: CanvasObject, e: React.PointerEvent) => {
     if (!isEditMode || !onPositionChange || e.button !== 0) return;
     if (obj.metadata?.pinned) return;
@@ -242,6 +278,17 @@ export function GalacticScene({
       for (const id of selectedObjectIds) {
         const o = objects.find((o) => o.id === id);
         if (o) groupStartPositions.set(id, { ...pos(o) });
+      }
+    } else if (viewType === 'solar-system') {
+      /* Solar system: drag parent → drag all children together (pozycje absolutne) */
+      const childIds = getChildrenIds(obj.id);
+      if (childIds.length > 0) {
+        groupStartPositions = new Map();
+        groupStartPositions.set(obj.id, { ...pos(obj) });
+        for (const cid of childIds) {
+          const c = objects.find((o) => o.id === cid);
+          if (c) groupStartPositions.set(cid, { ...pos(c) });
+        }
       }
     }
 
@@ -556,8 +603,24 @@ export function GalacticScene({
 
     const position = pos(obj);
     const isModuleZoom = viewType === 'module-zoom';
-    const satelliteScale = isModuleZoom ? (isMini ? 0.16 : 0.275) : (isMini ? 0.55 : 1);
-    const useScaleWrapper = isModuleZoom && satelliteScale !== 1;
+    const isSolarSystem = viewType === 'solar-system';
+    const isSolarSystemSatellite = obj.metadata?.isSolarSystemSatellite === true;
+    const isDirectChild = obj.type === 'subtask' && !obj.metadata?.minitaskId;
+    const isTaskLevelSubtask = isDirectChild && !!obj.metadata?.taskId;
+    const isMinitaskSubtask = !!obj.metadata?.minitaskId;
+    const baseScale = isModuleZoom
+      ? (isMini ? 0.16 : 0.275)
+      : isSolarSystem && isSolarSystemSatellite
+        ? (isMinitaskSubtask ? 0.2 : isTaskLevelSubtask ? 0.4 : 0.7)
+        : isMini
+          ? 0.55
+          : 1;
+    const satelliteScale = (isSolarSystem && isSolarSystemSatellite)
+      ? baseScale
+      : isModuleZoom && isTaskLevelSubtask
+        ? Math.min(1, baseScale * 5 * 0.6)
+        : (isDirectChild ? Math.min(1, baseScale * 5) : baseScale);
+    const useScaleWrapper = (isModuleZoom || (isSolarSystem && isSolarSystemSatellite)) && satelliteScale !== 1;
     const transform = !useScaleWrapper && satelliteScale !== 1
       ? `translate(-50%, -50%) scale(${satelliteScale})`
       : 'translate(-50%, -50%)';
@@ -579,6 +642,9 @@ export function GalacticScene({
     // When useScaleWrapper: inner div has position:absolute so outer collapses to 0×0 → outline draws around a point.
     // Give outer explicit size so selection outline renders correctly on all satellites.
     const wrapperSize = useScaleWrapper ? { width: 52, height: 58 } : undefined;
+    const innerClass = useScaleWrapper
+      ? `${type}${isSolarSystemSatellite ? '' : isMini ? ' sm' : ''}`
+      : undefined;
     return (
       <div
         key={obj.id}
@@ -603,7 +669,7 @@ export function GalacticScene({
         onMouseLeave={() => setHoveredObject(null)}
       >
         {useScaleWrapper ? (
-          <div className={`${type}${isMini ? ' sm' : ''}`}>
+          <div className={innerClass ?? `${type}${isMini ? ' sm' : ''}`}>
             {satelliteContent}
           </div>
         ) : (
@@ -617,13 +683,16 @@ export function GalacticScene({
   const renderMoon = (obj: CanvasObject) => {
     const type = getMoonVariant(obj);
     const isMini = obj.metadata?.isMiniature === true;
+    const isSolarSystemTask = obj.metadata?.isSolarSystemTask === true;
+    const sizeClass = isSolarSystemTask ? ' solar-sm' : isMini ? ' sm' : '';
+    const effectiveMini = isMini || isSolarSystemTask;
     
     return (
       <div
         key={obj.id}
         data-galactic-object
         data-object-id={obj.id}
-        className={`moon ${type}${isMini ? ' sm' : ''}`}
+        className={`moon ${type}${sizeClass}`}
         style={{
           left: `${pos(obj).x}px`,
           top: `${pos(obj).y}px`,
@@ -666,15 +735,13 @@ export function GalacticScene({
             />
           ) : null;
         })()}
-        {renderStarsCrown(obj.metadata?.priorityStars ?? 1, isMini ? 'sm' : 'md')}
+        {renderStarsCrown(obj.metadata?.priorityStars ?? 1, effectiveMini ? 'sm' : 'md')}
         <div className="moon-labels-inset">
-          {!isMini && (
-            <div className="moon-name-label" style={{ fontSize: '12px' }}>
-              {obj.name}
-            </div>
-          )}
+          <div className="moon-name-label" style={{ fontSize: effectiveMini ? '8px' : '12px' }}>
+            {obj.name}
+          </div>
           {obj.metadata?.dueDateDays !== undefined && obj.metadata?.dueDateDays !== null && (
-            <div className="moon-deadline-label" style={{ fontSize: isMini ? '7px' : '10px' }}>
+            <div className="moon-deadline-label" style={{ fontSize: effectiveMini ? '7px' : '10px' }}>
               {formatDeadlineDays(obj.metadata.dueDateDays)}
             </div>
           )}
@@ -695,15 +762,28 @@ export function GalacticScene({
     const type = (obj.metadata?.asteroidType || 'rocky').toLowerCase();
     const isMini = obj.metadata?.isMiniature === true;
     const isSolarSystemMini = obj.metadata?.isSolarSystemMini === true;
+    const isSolarSystemModuleMinitask = obj.metadata?.isSolarSystemModuleMinitask === true;
+    const isModuleLevelMinitask = isSolarSystemModuleMinitask || obj.metadata?.isModuleLevelMinitask === true;
+    const isProjectLevelMinitask = obj.metadata?.isProjectLevelMinitask === true;
     const isModuleZoom = viewType === 'module-zoom';
-    const sizeClass = isSolarSystemMini ? ' xs' : isMini && isModuleZoom ? ' md' : isMini ? ' sm' : '';
+    const sizeClass = isProjectLevelMinitask
+      ? ' solar-project'
+      : isSolarSystemModuleMinitask
+        ? ' solar-sm'
+        : isSolarSystemMini
+          ? ' solar-xs'
+          : isMini && isModuleZoom
+            ? ' md'
+            : isMini
+              ? ' sm'
+              : '';
 
     return (
       <div
         key={obj.id}
         data-galactic-object
         data-object-id={obj.id}
-        className={`asteroid ${type}${sizeClass}`}
+        className={`asteroid ${type}${sizeClass}${!isModuleLevelMinitask ? ' asteroid-task-labels' : ''}`}
         style={{
           left: `${pos(obj).x}px`,
           top: `${pos(obj).y}px`,
@@ -748,11 +828,17 @@ export function GalacticScene({
         })()}
         {renderStarsCrown(obj.metadata?.priorityStars ?? 1, isMini ? 'sm' : 'md')}
         <div className="asteroid-labels-inset">
-          <div className="asteroid-name-label" style={{ fontSize: isMini ? '7px' : '10px' }}>
+          <div
+            className="asteroid-name-label"
+            style={isModuleLevelMinitask ? { fontSize: '6px' } : undefined}
+          >
             {obj.name}
           </div>
           {obj.metadata?.dueDateDays !== undefined && obj.metadata?.dueDateDays !== null && (
-            <div className="asteroid-deadline-label" style={{ fontSize: isMini ? '7px' : '10px' }}>
+            <div
+              className="asteroid-deadline-label"
+              style={isModuleLevelMinitask ? { fontSize: '6px' } : undefined}
+            >
               {formatDeadlineDays(obj.metadata.dueDateDays)}
             </div>
           )}
@@ -824,12 +910,14 @@ export function GalacticScene({
     );
   };
 
-  // Render module-to-task and task-to-minitask hierarchy links (solar system only) - cienkie szare linie
+  // Render module-to-task, task-to-minitask, module-to-module-minitask, minitask-to-subtask hierarchy links (solar system only) - cienkie szare linie
   const renderModuleTaskLinks = () => {
     if (viewType !== 'solar-system') return null;
     const tasks = objects.filter((o) => o.type === 'task');
     const minitasks = objects.filter((o) => o.type === 'minitask' && o.metadata?.taskId);
-    const hasLinks = tasks.length > 0 || minitasks.length > 0;
+    const moduleMinitasks = objects.filter((o) => o.type === 'minitask' && o.metadata?.isSolarSystemModuleMinitask);
+    const subtasksWithMinitask = objects.filter((o) => o.type === 'subtask' && o.metadata?.minitaskId && o.metadata?.isSolarSystemSatellite);
+    const hasLinks = tasks.length > 0 || minitasks.length > 0 || moduleMinitasks.length > 0 || subtasksWithMinitask.length > 0;
     if (!hasLinks) return null;
 
     return (
@@ -881,6 +969,46 @@ export function GalacticScene({
               stroke="rgba(150, 150, 150, 0.25)"
               strokeWidth={1}
               strokeDasharray="3 2"
+            />
+          );
+        })}
+        {moduleMinitasks.map((minitask) => {
+          const moduleId = minitask.metadata?.moduleId;
+          if (!moduleId) return null;
+          const mod = objects.find((o) => o.type === 'module' && o.id === moduleId);
+          if (!mod) return null;
+          const from = pos(mod);
+          const to = pos(minitask);
+          return (
+            <line
+              key={`mod-minitask-${minitask.id}`}
+              x1={from.x}
+              y1={from.y}
+              x2={to.x}
+              y2={to.y}
+              stroke="rgba(150, 150, 150, 0.35)"
+              strokeWidth={1}
+              strokeDasharray="4 3"
+            />
+          );
+        })}
+        {subtasksWithMinitask.map((subtask) => {
+          const minitaskId = subtask.metadata?.minitaskId;
+          if (!minitaskId) return null;
+          const asteroid = objects.find((o) => o.type === 'minitask' && o.id === minitaskId);
+          if (!asteroid) return null;
+          const from = pos(asteroid);
+          const to = pos(subtask);
+          return (
+            <line
+              key={`minitask-sub-solar-${subtask.id}`}
+              x1={from.x}
+              y1={from.y}
+              x2={to.x}
+              y2={to.y}
+              stroke="rgba(150, 150, 150, 0.2)"
+              strokeWidth={1}
+              strokeDasharray="2 2"
             />
           );
         })}

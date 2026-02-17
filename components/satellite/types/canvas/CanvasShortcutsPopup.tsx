@@ -82,6 +82,7 @@ export function CanvasShortcutsPopup({ onClose }: CanvasShortcutsPopupProps) {
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
+        className="scrollbar-cosmic scrollbar-cosmic-orange"
         style={{
           minWidth: 360,
           maxWidth: 'min(440px, calc(100vw - 40px))',
