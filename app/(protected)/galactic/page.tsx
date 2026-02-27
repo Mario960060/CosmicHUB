@@ -98,7 +98,7 @@ export default function GalacticPage() {
   } | null>(null);
   const [pendingPortalDependency, setPendingPortalDependency] = useState<{
     sourceEntityId: string;
-    sourceEntityType: 'module' | 'task' | 'subtask' | 'minitask';
+    sourceEntityType: 'module' | 'task' | 'subtask' | 'minitask' | 'project';
     targetModuleId: string;
     targetModuleName: string;
   } | null>(null);

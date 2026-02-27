@@ -25,7 +25,7 @@ interface GalacticSceneProps {
   selectedObjectId?: string | null;
   selectedObjectIds?: Set<string>;
   connectionModeForSubtaskId?: string | null;
-  connectionModeSource?: { entityId: string; entityType: 'module' | 'task' | 'subtask' | 'minitask' } | null;
+  connectionModeSource?: { entityId: string; entityType: 'module' | 'task' | 'subtask' | 'minitask' | 'project' } | null;
   positionOverrides?: Map<string, { x: number; y: number }>;
   onPositionChange?: (objectId: string, x: number, y: number) => void;
 }

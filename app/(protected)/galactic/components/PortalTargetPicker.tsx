@@ -20,7 +20,7 @@ const DEPENDENCY_OPTIONS: { value: DependencyType; label: string }[] = [
 
 interface PortalTargetPickerProps {
   sourceEntityId: string;
-  sourceEntityType: 'module' | 'task' | 'subtask' | 'minitask';
+  sourceEntityType: 'module' | 'task' | 'subtask' | 'minitask' | 'project';
   targetModuleId: string;
   targetModuleName: string;
   onClose: () => void;

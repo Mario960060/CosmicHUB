@@ -75,6 +75,7 @@ export function ModuleCard({ module }: ModuleCardProps) {
       <CreateTaskDialog
         open={showCreateTask}
         onClose={() => setShowCreateTask(false)}
+        projectId={module.project_id}
         moduleId={module.id}
       />
     </>
