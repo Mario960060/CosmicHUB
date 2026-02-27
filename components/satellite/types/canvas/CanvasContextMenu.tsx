@@ -110,8 +110,11 @@ interface BlockContextMenuProps {
   onFontColorChange: (color: BlockColor | null) => void;
   onFontSize: (size: 'sm' | 'md' | 'lg') => void;
   onTextAlign: (align: BlockTextAlign) => void;
+  onCopy: () => void;
+  onPaste: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  canPaste: boolean;
   onClose: () => void;
 }
 
@@ -126,8 +129,11 @@ export function BlockContextMenu({
   onFontColorChange,
   onFontSize,
   onTextAlign,
+  onCopy,
+  onPaste,
   onDuplicate,
   onDelete,
+  canPaste,
   onClose,
 }: BlockContextMenuProps) {
   const fontColorOptions = BLOCK_COLORS.filter((c) => c !== blockColor);
@@ -225,6 +231,8 @@ export function BlockContextMenu({
         </div>
       </div>
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
+      <CtxItem icon="Copy" onClick={onCopy} shortcut="Ctrl+C" />
+      <CtxItem icon="Paste" onClick={onPaste} shortcut="Ctrl+V" disabled={!canPaste} />
       <CtxItem icon="Duplicate" onClick={onDuplicate} shortcut="Ctrl+D" />
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
       <CtxItem icon="Delete" onClick={onDelete} shortcut="Del" danger />
@@ -236,11 +244,15 @@ interface LineContextMenuProps {
   x: number;
   y: number;
   onEditLabel: () => void;
+  onCopy: () => void;
+  onPaste: () => void;
   onDelete: () => void;
+  canCopy: boolean;
+  canPaste: boolean;
   onClose: () => void;
 }
 
-export function LineContextMenu({ x, y, onEditLabel, onDelete, onClose }: LineContextMenuProps) {
+export function LineContextMenu({ x, y, onEditLabel, onCopy, onPaste, onDelete, canCopy, canPaste, onClose }: LineContextMenuProps) {
   return (
     <PositionedContextMenu
       x={x}
@@ -258,6 +270,9 @@ export function LineContextMenu({ x, y, onEditLabel, onDelete, onClose }: LineCo
     >
       <CtxItem icon="Edit label" onClick={onEditLabel} />
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
+      <CtxItem icon="Copy" onClick={onCopy} shortcut="Ctrl+C" disabled={!canCopy} />
+      <CtxItem icon="Paste" onClick={onPaste} shortcut="Ctrl+V" disabled={!canPaste} />
+      <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
       <CtxItem icon="Delete" onClick={onDelete} danger />
     </PositionedContextMenu>
   );
@@ -267,10 +282,12 @@ interface CanvasContextMenuProps {
   x: number;
   y: number;
   onAddBlock: () => void;
+  onCopy: () => void;
   onPaste: () => void;
   onZoomFit: () => void;
   onResetView: () => void;
   onGridToggle: () => void;
+  canCopy: boolean;
   canPaste: boolean;
   onClose: () => void;
 }
@@ -300,10 +317,13 @@ interface ShapeContextMenuProps {
   onCornerRadius?: (radius: number) => void;
   onArrowStart?: (v: boolean) => void;
   onArrowEnd?: (v: boolean) => void;
+  onCopy: () => void;
+  onPaste: () => void;
   onDuplicate: () => void;
   onBringToFront: () => void;
   onSendToBack: () => void;
   onDelete: () => void;
+  canPaste: boolean;
   onClose: () => void;
 }
 
@@ -318,10 +338,13 @@ export function ShapeContextMenu({
   onCornerRadius,
   onArrowStart,
   onArrowEnd,
+  onCopy,
+  onPaste,
   onDuplicate,
   onBringToFront,
   onSendToBack,
   onDelete,
+  canPaste,
   onClose,
 }: ShapeContextMenuProps) {
   const stroke = shape.stroke;
@@ -538,6 +561,8 @@ export function ShapeContextMenu({
         </div>
       )}
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
+      <CtxItem icon="Copy" onClick={onCopy} shortcut="Ctrl+C" />
+      <CtxItem icon="Paste" onClick={onPaste} shortcut="Ctrl+V" disabled={!canPaste} />
       <CtxItem icon="Duplicate" onClick={onDuplicate} shortcut="Ctrl+D" />
       <CtxItem icon="Bring to front" onClick={onBringToFront} />
       <CtxItem icon="Send to back" onClick={onSendToBack} />
@@ -551,10 +576,12 @@ export function CanvasContextMenu({
   x,
   y,
   onAddBlock,
+  onCopy,
   onPaste,
   onZoomFit,
   onResetView,
   onGridToggle,
+  canCopy,
   canPaste,
   onClose,
 }: CanvasContextMenuProps) {
@@ -574,6 +601,7 @@ export function CanvasContextMenu({
       onClick={(e: React.MouseEvent) => e.stopPropagation()}
     >
       <CtxItem icon="New block here" onClick={onAddBlock} shortcut="B" />
+      <CtxItem icon="Copy" onClick={onCopy} shortcut="Ctrl+C" disabled={!canCopy} />
       <CtxItem icon="Paste" onClick={onPaste} shortcut="Ctrl+V" disabled={!canPaste} />
       <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', margin: '3px 8px' }} />
       <CtxItem icon="Zoom to fit" onClick={onZoomFit} shortcut="Ctrl+1" />

@@ -194,7 +194,14 @@ export interface TasksHierarchyModule {
   id: string;
   name: string;
   channel_id: string | null;
-  tasks: { id: string; name: string }[];
+  tasks: TasksHierarchyTask[];
+}
+
+export interface TasksHierarchyTask {
+  id: string;
+  name: string;
+  minitasks: { id: string; name: string }[];
+  subtasks: { id: string; name: string }[];
 }
 
 export function useTasksHierarchy(userId: string | undefined) {
@@ -250,10 +257,57 @@ export function useTasksHierarchy(userId: string | undefined) {
         .order('created_at', { ascending: false });
       if (taskErr) throw taskErr;
 
-      const tasksByModule = new Map<string, { id: string; name: string }[]>();
+      const taskIds = (tasks || []).map((t) => t.id);
+
+      const { data: minitasks } = await supabase
+        .from('minitasks')
+        .select('id, name, task_id')
+        .in('task_id', taskIds);
+      const minitasksByTask = new Map<string, { id: string; name: string }[]>();
+      (minitasks || []).forEach((m) => {
+        const list = minitasksByTask.get(m.task_id) || [];
+        list.push({ id: m.id, name: m.name });
+        minitasksByTask.set(m.task_id, list);
+      });
+
+      const minitaskIdsAll = (minitasks || []).map((m) => m.id);
+      let allSubtaskRows: { id: string; name: string; parent_id: string | null; minitask_id: string | null }[] = [];
+      if (taskIds.length > 0) {
+        const { data: stByTask } = await supabase
+          .from('subtasks')
+          .select('id, name, parent_id, minitask_id')
+          .in('parent_id', taskIds);
+        allSubtaskRows = [...allSubtaskRows, ...(stByTask || [])];
+      }
+      if (minitaskIdsAll.length > 0) {
+        const { data: stByMinitask } = await supabase
+          .from('subtasks')
+          .select('id, name, parent_id, minitask_id')
+          .in('minitask_id', minitaskIdsAll);
+        allSubtaskRows = [...allSubtaskRows, ...(stByMinitask || [])];
+      }
+      const subtasksByTask = new Map<string, Map<string, { id: string; name: string }>>();
+      const minitaskToTask = new Map<string, string>();
+      (minitasks || []).forEach((m) => minitaskToTask.set(m.id, m.task_id));
+      allSubtaskRows.forEach((s) => {
+        const taskId = s.parent_id || (s.minitask_id ? minitaskToTask.get(s.minitask_id) : undefined);
+        if (taskId) {
+          const map = subtasksByTask.get(taskId) || new Map();
+          map.set(s.id, { id: s.id, name: s.name });
+          subtasksByTask.set(taskId, map);
+        }
+      });
+
+      const tasksByModule = new Map<string, { id: string; name: string; minitasks: { id: string; name: string }[]; subtasks: { id: string; name: string }[] }[]>();
       (tasks || []).forEach((t) => {
         const list = tasksByModule.get(t.module_id) || [];
-        list.push({ id: t.id, name: t.name });
+        const stMap = subtasksByTask.get(t.id);
+        list.push({
+          id: t.id,
+          name: t.name,
+          minitasks: minitasksByTask.get(t.id) || [],
+          subtasks: stMap ? Array.from(stMap.values()) : [],
+        });
         tasksByModule.set(t.module_id, list);
       });
 

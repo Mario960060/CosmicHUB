@@ -7,7 +7,7 @@ import { formatRelativeTime } from '@/lib/utils';
 import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
 import { toast } from 'sonner';
 import { CosmicDropdown } from '../CosmicDropdown';
-import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, Plus, Trash2, GripVertical } from 'lucide-react';
 
 interface AssignablePerson {
   user_id: string;
@@ -28,6 +28,7 @@ interface Issue {
   resolved_at?: string | null;
   linked_task_id?: string | null;
   comments: unknown[];
+  order: number;
 }
 
 interface IssuesContentProps {
@@ -39,6 +40,7 @@ interface IssuesContentProps {
   isAdmin?: boolean;
   isProjectManager?: boolean;
   isTaskResponsible?: boolean;
+  canReorder?: boolean;
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -46,6 +48,13 @@ const SEVERITY_COLORS: Record<string, string> = {
   high: '#f97316',
   medium: '#f59e0b',
   low: '#22c55e',
+};
+
+const STATUS_BG: Record<string, string> = {
+  fixed: 'rgba(34, 197, 94, 0.15)',
+  in_progress: 'rgba(234, 179, 8, 0.15)',
+  wont_fix: 'rgba(239, 68, 68, 0.15)',
+  open: 'rgba(0, 0, 0, 0.2)',
 };
 
 function normalizeAssignable(people: AssignablePerson[] | undefined): AssignablePerson[] {
@@ -59,7 +68,7 @@ function normalizeAssignable(people: AssignablePerson[] | undefined): Assignable
 function getIssues(data: Record<string, unknown>): Issue[] {
   const raw = data.issues;
   if (!Array.isArray(raw)) return [];
-  return raw.map((i: any) => ({
+  return raw.map((i: any, idx: number) => ({
     id: i.id || crypto.randomUUID(),
     title: i.title || '',
     description: i.description || '',
@@ -73,6 +82,7 @@ function getIssues(data: Record<string, unknown>): Issue[] {
     resolved_at: i.resolved_at,
     linked_task_id: i.linked_task_id,
     comments: Array.isArray(i.comments) ? i.comments : [],
+    order: typeof i.order === 'number' ? i.order : idx,
   }));
 }
 
@@ -85,6 +95,7 @@ export function IssuesContent({
   isAdmin = false,
   isProjectManager = false,
   isTaskResponsible = false,
+  canReorder = false,
 }: IssuesContentProps) {
   const { user } = useAuth();
   const invalidate = useInvalidateSatelliteQueries();
@@ -98,8 +109,28 @@ export function IssuesContent({
   const [newType, setNewType] = useState<Issue['type']>('bug');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   const people = normalizeAssignable(assignablePeople);
+
+  const reorderIssues = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    const sorted = [...issues].sort((a, b) => a.order - b.order);
+    const reordered = [...sorted];
+    const [removed] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, removed);
+    const next = reordered.map((i, idx) => ({ ...i, order: idx }));
+    save(next, { user_id: user!.id, action: 'reordered_issues', detail: '', actor_name: user!.full_name });
+    setDraggedIndex(toIndex);
+  };
+
+  const handleIssueDragStart = (index: number) => setDraggedIndex(index);
+  const handleIssueDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null) return;
+    if (draggedIndex !== index) reorderIssues(draggedIndex, index);
+  };
+  const handleIssueDragEnd = () => setDraggedIndex(null);
   const canDelete = !!user && (isAdmin || isProjectManager || isTaskResponsible || createdBy === user.id);
 
   useEffect(() => {
@@ -135,8 +166,9 @@ export function IssuesContent({
       reported_by: user.id,
       created_at: new Date().toISOString(),
       comments: [],
+      order: 0,
     };
-    const next = [issue, ...issues];
+    const next = [issue, ...issues.map((i, idx) => ({ ...i, order: idx + 1 }))];
     save(next, { user_id: user.id, action: 'added_issue', detail: newTitle.trim(), actor_name: user.full_name });
     setNewTitle('');
     setNewDesc('');
@@ -206,11 +238,14 @@ export function IssuesContent({
     setExpandedId(null);
   };
 
-  const filtered = issues.filter((i) => {
+  const sortedByOrder = [...issues].sort((a, b) => a.order - b.order);
+  const filtered = sortedByOrder.filter((i) => {
     if (filterStatus !== 'all' && i.status !== filterStatus) return false;
     if (filterType !== 'all' && i.type !== filterType) return false;
     return true;
   });
+  const isFilterAll = filterStatus === 'all' && filterType === 'all';
+  const showDragHandle = canReorder && isFilterAll;
 
   const criticalCount = issues.filter((i) => i.severity === 'critical').length;
   const mediumCount = issues.filter((i) => i.severity === 'medium').length;
@@ -385,25 +420,38 @@ export function IssuesContent({
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {filtered.map((issue) => {
+        {filtered.map((issue, index) => {
           const isExpanded = expandedId === issue.id;
           const color = SEVERITY_COLORS[issue.severity] || '#6b7280';
           const isResolved = issue.status === 'fixed' || issue.status === 'wont_fix';
+          const statusBg = STATUS_BG[issue.status] ?? STATUS_BG.open;
 
           return (
             <div
               key={issue.id}
+              draggable={showDragHandle}
+              onDragStart={() => showDragHandle && handleIssueDragStart(index)}
+              onDragOver={(e) => showDragHandle && handleIssueDragOver(e, index)}
+              onDragEnd={() => handleIssueDragEnd()}
               onClick={() => setExpandedId(isExpanded ? null : issue.id)}
               style={{
                 padding: '12px 14px',
-                background: isResolved ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.2)',
+                background: statusBg,
                 borderLeft: `4px solid ${color}`,
                 borderRadius: '8px',
-                cursor: 'pointer',
-                opacity: isResolved ? 0.8 : 1,
+                cursor: showDragHandle ? 'grab' : 'pointer',
+                opacity: isResolved ? 0.8 : draggedIndex === index ? 0.5 : 1,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                {showDragHandle && (
+                  <div
+                    style={{ cursor: 'grab', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <GripVertical size={16} />
+                  </div>
+                )}
                 <div
                   style={{
                     padding: '2px 8px',

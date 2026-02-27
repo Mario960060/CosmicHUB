@@ -35,6 +35,10 @@ export function getChannelDisplayName(ch: any, currentUserId?: string) {
   }
   if (ch.type === 'tasks') return ch.project?.name ? `${ch.project.name} Tasks` : 'Tasks';
   if (ch.type === 'group') return ch.name || 'Group';
+  // Project-level channel (sun): show project name instead of "general"
+  if (ch.type === 'channel' && ch.project?.name && !ch.module_id && !ch.task_id) {
+    return ch.project.name;
+  }
   return ch.name || 'Unknown';
 }
 

@@ -104,6 +104,71 @@ export function useGalacticData(
           moduleSubtasks,
           moduleMinitasks
         );
+
+        // Fetch dependencies for solar system view (modules, tasks, minitasks, subtasks)
+        const allModuleIds = modules.map((m: any) => m.id);
+        const allTasks = modules.flatMap((m: any) => m.tasks || []);
+        const allTaskIds = allTasks.map((t: any) => t.id);
+        const allMinitasks = allTasks.flatMap((t: any) => t.minitasks || []);
+        const allMinitaskIds = allMinitasks.map((m: any) => m.id);
+        const allSubtaskIds = [
+          ...projectSubtasks.map((s: any) => s.id),
+          ...moduleSubtasks.map((s: any) => s.id),
+          ...allTasks.flatMap((t: any) => (t.subtasks || []).map((s: any) => s.id)),
+          ...allMinitasks.flatMap((m: any) => (m.subtasks || []).map((s: any) => s.id)),
+        ];
+        const currentEntityIds = new Set<string>([projectId!, ...allModuleIds, ...allTaskIds, ...allMinitaskIds, ...allSubtaskIds]);
+
+        const { data: deps } = await supabase.from('dependencies').select('*');
+        const relevantDeps = (deps || []).filter(
+          (d: any) => currentEntityIds.has(d.source_id) || currentEntityIds.has(d.target_id)
+        );
+
+        const entityToModule = new Map<string, string>();
+        allModuleIds.forEach((id: string) => entityToModule.set(id, id));
+        allTasks.forEach((t: any) => {
+          entityToModule.set(t.id, t.module_id);
+          (t.minitasks || []).forEach((mt: any) => entityToModule.set(mt.id, t.module_id));
+        });
+        moduleMinitasks.forEach((m: any) => entityToModule.set(m.id, m.module_id));
+        const taskIds = allTaskIds;
+        const minitaskIds = allMinitaskIds;
+        let allSubtasks: any[] = [];
+        if (taskIds.length > 0) {
+          const { data: st1 } = await supabase.from('subtasks').select('id, parent_id, module_id, minitask_id').in('parent_id', taskIds);
+          allSubtasks = st1 || [];
+        }
+        if (allModuleIds.length > 0) {
+          const { data: st2 } = await supabase.from('subtasks').select('id, parent_id, module_id, minitask_id').in('module_id', allModuleIds);
+          allSubtasks = [...allSubtasks, ...(st2 || [])];
+        }
+        if (minitaskIds.length > 0) {
+          const { data: st3 } = await supabase.from('subtasks').select('id, parent_id, module_id, minitask_id').in('minitask_id', minitaskIds);
+          allSubtasks = [...allSubtasks, ...(st3 || [])];
+        }
+        allTasks.forEach((t: any) => entityToModule.set(t.id, t.module_id));
+        allSubtasks.forEach((s: any) => {
+          if (s.module_id) entityToModule.set(s.id, s.module_id);
+          else if (s.parent_id) {
+            const t = allTasks.find((x: any) => x.id === s.parent_id);
+            if (t) entityToModule.set(s.id, t.module_id);
+          } else if (s.minitask_id) {
+            const taskWithMinitask = allTasks.find((t: any) => (t.minitasks || []).some((m: any) => m.id === s.minitask_id));
+            if (taskWithMinitask) entityToModule.set(s.id, taskWithMinitask.module_id);
+            else {
+              const modM = moduleMinitasks.find((m: any) => m.id === s.minitask_id);
+              if (modM) entityToModule.set(s.id, modM.module_id);
+            }
+          }
+        });
+
+        const depsWithModules = relevantDeps.map((d: any) => ({
+          ...d,
+          source_module_id: entityToModule.get(d.source_id) ?? (d.source_type === 'module' ? d.source_id : null),
+          target_module_id: entityToModule.get(d.target_id) ?? (d.target_type === 'module' ? d.target_id : null),
+        }));
+
+        dependencies = transformDependencies(depsWithModules, objects, undefined);
       } else if (zoom === 'task' && taskId && moduleId && projectId) {
         // Task System view: Moon center + asteroids + satellites + portals to other tasks
         const [taskRes, minitasksRes, allTasksRes, positionsRes] = await Promise.all([

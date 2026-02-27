@@ -62,6 +62,64 @@ export function getDependencyTypeColor(type: string): string {
   }
 }
 
+/** Clickable dependency row – from/to are links that call onNavigateToSubtask */
+export function DependencyRow({
+  dep,
+  onNavigateToSubtask,
+}: {
+  dep: { id: string; dependency_type?: string; note?: string | null; dependent_subtask?: { id: string; name: string } | null; depends_on_subtask?: { id: string; name: string } | null };
+  onNavigateToSubtask?: (subtaskId: string) => void;
+}) {
+  const from = dep.dependent_subtask?.name || '?';
+  const to = dep.depends_on_subtask?.name || '?';
+  const fromId = dep.dependent_subtask?.id;
+  const toId = dep.depends_on_subtask?.id;
+  const typ = dep.dependency_type || 'depends_on';
+  const color = getDependencyTypeColor(typ);
+
+  const linkStyle: React.CSSProperties = {
+    color: 'rgba(0,217,255,0.9)',
+    textDecoration: 'underline',
+    cursor: 'pointer',
+  };
+
+  return (
+    <div style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+      <span style={{ color, fontSize: 11, fontWeight: 600 }}>{formatDependencyType(typ)}</span>
+      {dep.note && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>{dep.note}</div>}
+      <div style={{ marginTop: 2 }}>
+        {onNavigateToSubtask && fromId ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigateToSubtask(fromId)}
+            onKeyDown={(e) => e.key === 'Enter' && onNavigateToSubtask(fromId)}
+            style={linkStyle}
+          >
+            {from}
+          </span>
+        ) : (
+          <span>{from}</span>
+        )}
+        {' → '}
+        {onNavigateToSubtask && toId ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigateToSubtask(toId)}
+            onKeyDown={(e) => e.key === 'Enter' && onNavigateToSubtask(toId)}
+            style={linkStyle}
+          >
+            {to}
+          </span>
+        ) : (
+          <span>{to}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function renderStars(stars: number, color = '#fbbf24', size = 16) {
   const fullStars = Math.floor(stars);
   const hasHalf = stars % 1 >= 0.5;

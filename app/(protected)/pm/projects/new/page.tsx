@@ -10,6 +10,7 @@ import { useUsers, useModules } from '@/lib/pm/queries';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { InlineModuleForm } from './components/InlineModuleForm';
 import { InlineTaskForm } from './components/InlineTaskForm';
+import { InlineMinitaskForm } from './components/InlineMinitaskForm';
 import { FolderPlus, User, Calendar, FileText, ArrowLeft, Satellite, CheckCircle, Rocket, LayoutGrid, Globe } from 'lucide-react';
 import { z } from 'zod';
 
@@ -889,12 +890,17 @@ export default function NewProjectPage() {
               color: 'rgba(255, 255, 255, 0.5)',
               marginBottom: '20px',
             }}>
-              Add modules and tasks now, or add them later from the project page.
+              Add modules, tasks and minitasks now, or add them later from the project page.
             </p>
 
-            {/* Inline Add Module */}
-            <div style={{ marginBottom: '24px' }}>
+            {/* Inline Add Module + Add Minitask (project level) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
               <InlineModuleForm projectId={createdProjectId} />
+              <InlineMinitaskForm
+                projectId={createdProjectId}
+                parentLabel="projektu"
+                onSuccess={() => {}}
+              />
             </div>
 
             {/* List of modules with add task */}
@@ -940,27 +946,54 @@ export default function NewProjectPage() {
                     </div>
                     {module.tasks && module.tasks.length > 0 && (
                       <div style={{ marginBottom: '12px', marginLeft: '16px' }}>
-                        {module.tasks.map((task) => (
-                          <div
-                            key={task.id}
-                            style={{
-                              padding: '8px 12px',
-                              background: 'rgba(0, 0, 0, 0.2)',
-                              borderRadius: '8px',
-                              marginBottom: '6px',
-                              fontSize: '13px',
-                              color: 'rgba(255, 255, 255, 0.8)',
-                            }}
-                          >
-                            {task.name}
-                          </div>
-                        ))}
+                        {module.tasks.map((task) => {
+                          const minitasks = (task as { minitasks?: { id: string; name: string }[] }).minitasks ?? [];
+                          return (
+                            <div
+                              key={task.id}
+                              style={{
+                                padding: '12px 14px',
+                                background: 'rgba(0, 0, 0, 0.25)',
+                                borderRadius: '10px',
+                                marginBottom: '10px',
+                                border: '1px solid rgba(0, 217, 255, 0.1)',
+                              }}
+                            >
+                              <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.9)', fontWeight: 600, marginBottom: '8px' }}>
+                                {task.name}
+                              </div>
+                              {minitasks.length > 0 && (
+                                <div style={{ marginLeft: '12px', marginBottom: '8px' }}>
+                                  {minitasks.map((m) => (
+                                    <div key={m.id} style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.6)', padding: '4px 0' }}>
+                                      🪨 {m.name}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <InlineMinitaskForm
+                                projectId={createdProjectId}
+                                taskId={task.id}
+                                taskName={task.name}
+                                onSuccess={() => {}}
+                              />
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
-                    <InlineTaskForm
-                      moduleId={module.id}
-                      moduleName={module.name}
-                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <InlineTaskForm
+                        moduleId={module.id}
+                        moduleName={module.name}
+                      />
+                      <InlineMinitaskForm
+                        projectId={createdProjectId}
+                        moduleId={module.id}
+                        moduleName={module.name}
+                        onSuccess={() => {}}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

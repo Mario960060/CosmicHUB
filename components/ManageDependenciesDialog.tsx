@@ -1,212 +1,373 @@
-// CURSOR: Dialog for managing subtask dependencies
+// CURSOR: Dialog for managing subtask dependencies – UI from reference HTML
 
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState, useEffect } from 'react';
+import { Dialog as HeadlessDialog, Transition } from '@headlessui/react';
+import { createPortal } from 'react-dom';
 import { useCreateDependency, useDeleteDependency } from '@/lib/pm/mutations';
-import { useDependencies, useAvailableSubtasksForDependency, type DependencyType } from '@/lib/pm/queries';
-import { Dialog } from '@/components/ui/Dialog';
-import { Button } from '@/components/ui/Button';
-import { Label } from '@/components/ui/Label';
-import { AlertCircle, Link as LinkIcon, Trash2, CheckCircle2, Clock, Circle } from 'lucide-react';
+import { useDependenciesForEntity, type DependencyType, type DependencyWithTarget } from '@/lib/pm/queries';
+import { DependencyTargetPicker, type SelectedTarget } from '@/components/DependencyTargetPicker';
+import { AlertCircle } from 'lucide-react';
+import './ManageDependenciesDialog.css';
 
 const DEPENDENCY_TYPE_LABELS: Record<DependencyType, string> = {
-  blocks: 'Blocks (hard) – B cannot start until A is done',
-  depends_on: 'Depends on – A should follow B, but can start earlier',
-  related_to: 'Related to – informational link only',
+  blocks: 'Blocks',
+  depends_on: 'Depends on',
+  related_to: 'Related to',
 };
+
+function formatStatus(status: string): string {
+  switch (status) {
+    case 'done':
+      return 'Done';
+    case 'in_progress':
+      return 'In Progress';
+    case 'blocked':
+      return 'Blocked';
+    default:
+      return 'To Do';
+  }
+}
+
+function getStatusClass(status: string): string {
+  switch (status) {
+    case 'done':
+      return 'done';
+    case 'in_progress':
+      return 'progress';
+    default:
+      return '';
+  }
+}
+
+function formatSatelliteLabel(satelliteType: string | null | undefined): string {
+  if (!satelliteType) return 'Notes satellite';
+  const label = satelliteType.charAt(0).toUpperCase() + satelliteType.slice(1).replace(/_/g, ' ');
+  return `${label} satellite`;
+}
+
+function DepCard({
+  dep,
+  depType,
+  onRemove,
+  isPending,
+  DEPENDENCY_TYPE_LABELS,
+}: {
+  dep: DependencyWithTarget;
+  depType: DependencyType;
+  onRemove: () => void;
+  isPending: boolean;
+  DEPENDENCY_TYPE_LABELS: Record<DependencyType, string>;
+}) {
+  const status = dep.target_status || 'todo';
+  const typeBarClass =
+    depType === 'blocks' ? 'blocks' : depType === 'depends_on' ? 'depends' : 'related';
+  return (
+    <div className="manage-deps-dep-card">
+      <div className={`manage-deps-dep-type-bar ${typeBarClass}`} />
+      <div className="manage-deps-dep-info">
+        <div className="manage-deps-dep-name">{dep.target_name}</div>
+        <div className="manage-deps-dep-meta">
+          <span className={`manage-deps-dep-type-badge ${typeBarClass}`}>
+            {DEPENDENCY_TYPE_LABELS[depType]}
+          </span>
+          {dep.target_status && (
+            <span className={`manage-deps-dep-status ${getStatusClass(status)}`}>
+              {formatStatus(status)}
+            </span>
+          )}
+          {dep.target_satellite_type && (
+            <span>{formatSatelliteLabel(dep.target_satellite_type)}</span>
+          )}
+        </div>
+      </div>
+      <button
+        type="button"
+        className="manage-deps-dep-remove"
+        onClick={onRemove}
+        disabled={isPending}
+        title="Remove"
+      >
+        <svg viewBox="0 0 24 24">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+    </div>
+  );
+}
 
 interface ManageDependenciesDialogProps {
   open: boolean;
   onClose: () => void;
-  subtaskId: string;
-  subtaskName: string;
+  projectId: string;
+  sourceType: 'subtask' | 'task' | 'minitask' | 'module' | 'project';
+  sourceId: string;
+  sourceName: string;
 }
 
 export function ManageDependenciesDialog({
   open,
   onClose,
-  subtaskId,
-  subtaskName,
+  projectId,
+  sourceType,
+  sourceId,
+  sourceName,
 }: ManageDependenciesDialogProps) {
-  const [selectedSubtaskId, setSelectedSubtaskId] = useState('');
-  const [selectedType, setSelectedType] = useState<DependencyType>('depends_on');
+  const [mounted, setMounted] = useState(false);
+  const [selectedTarget, setSelectedTarget] = useState<SelectedTarget | null>(null);
+  const [selectedType, setSelectedType] = useState<DependencyType>('blocks');
   const [error, setError] = useState('');
 
-  const { data: dependencies, isLoading: loadingDeps } = useDependencies(subtaskId);
-  const { data: availableSubtasks, isLoading: loadingAvailable } = useAvailableSubtasksForDependency(subtaskId);
+  const { data: depResult, isLoading: loadingDeps } = useDependenciesForEntity(sourceType, sourceId);
+  const dependencies = depResult?.all ?? [];
+  const outgoing = depResult?.outgoing ?? [];
+  const incoming = depResult?.incoming ?? [];
   const createDependency = useCreateDependency();
   const deleteDependency = useDeleteDependency();
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const handleAddDependency = async () => {
-    if (!selectedSubtaskId) {
-      setError('Please select a subtask');
+    if (!selectedTarget) {
+      setError('Wybierz cel zależności');
+      return;
+    }
+    if (sourceType === selectedTarget.type && sourceId === selectedTarget.id) {
+      setError('Nie można utworzyć zależności do samego siebie');
       return;
     }
 
     try {
       await createDependency.mutateAsync({
-        sourceType: 'subtask',
-        sourceId: subtaskId,
-        targetType: 'subtask',
-        targetId: selectedSubtaskId,
+        sourceType,
+        sourceId,
+        targetType: selectedTarget.type,
+        targetId: selectedTarget.id,
         dependencyType: selectedType,
       });
-      setSelectedSubtaskId('');
+      setSelectedTarget(null);
       setError('');
-    } catch (err: any) {
-      setError(err.message || 'Failed to add dependency');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Nie udało się dodać zależności');
     }
   };
 
   const handleDeleteDependency = async (dependencyId: string) => {
     try {
       await deleteDependency.mutateAsync({ dependencyId });
-    } catch (err: any) {
-      setError(err.message || 'Failed to remove dependency');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to remove dependency');
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'done':
-        return <CheckCircle2 className="w-4 h-4 text-green-400" />;
-      case 'in_progress':
-        return <Clock className="w-4 h-4 text-yellow-400" />;
-      case 'blocked':
-        return <AlertCircle className="w-4 h-4 text-red-400" />;
-      default:
-        return <Circle className="w-4 h-4 text-primary/40" />;
-    }
-  };
+  const selectType = (type: DependencyType) => setSelectedType(type);
 
-  return (
-    <Dialog open={open} onClose={onClose} title="Manage Dependencies" maxWidth="lg">
-      <div className="space-y-6">
-        {/* Info */}
-        <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
-          <p className="text-sm text-primary/80">
-            <strong>&quot;{subtaskName}&quot;</strong> – only <strong>Blocks</strong> type blocks the subtask. Depends on and Related to are soft/informational.
-          </p>
-        </div>
+  if (!mounted) return null;
 
-        {/* Current Dependencies */}
-        <div>
-          <h4 className="text-sm font-medium text-primary mb-3 flex items-center gap-2">
-            <LinkIcon className="w-4 h-4" />
-            Current Dependencies ({dependencies?.length || 0})
-          </h4>
+  const modalRoot = document.getElementById('modal-root');
+  if (!modalRoot) return null;
 
-          {loadingDeps ? (
-            <p className="text-sm text-primary/60">Loading...</p>
-          ) : dependencies && dependencies.length > 0 ? (
-            <div className="space-y-2">
-              {dependencies.map((dep) => (
-                <div
-                  key={dep.id}
-                  className="flex items-center justify-between bg-surface border border-primary/20 rounded-lg p-3"
-                >
-                  <div className="flex items-center gap-3 flex-1">
-                    {getStatusIcon(dep.depends_on_subtask?.status || 'todo')}
-                    <div>
-                      <p className="text-sm text-primary">
-                        {dep.depends_on_subtask?.name || 'Unknown'}
-                      </p>
-                      <p className="text-xs text-primary/50 capitalize">
-                        {dep.dependency_type || 'depends_on'} · Status: {dep.depends_on_subtask?.status || 'unknown'}
-                      </p>
+  const dialogContent = (
+    <Transition appear show={open} as={Fragment}>
+      <HeadlessDialog as="div" className="relative z-[9999]" onClose={onClose}>
+        <Transition.Child
+          as={Fragment}
+          enter="ease-out duration-200"
+          enterFrom="opacity-0"
+          enterTo="opacity-100"
+          leave="ease-in duration-150"
+          leaveFrom="opacity-100"
+          leaveTo="opacity-0"
+        >
+          <div className="manage-deps-backdrop" aria-hidden="true" style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
+        </Transition.Child>
+
+        <div className="fixed inset-0 overflow-y-auto" style={{ position: 'fixed', inset: 0, overflowY: 'auto', zIndex: 9999 }}>
+          <div className="flex min-h-full items-center justify-center p-6">
+            <Transition.Child
+              as={Fragment}
+              enter="ease-out duration-200"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
+              leave="ease-in duration-150"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
+            >
+              <HeadlessDialog.Panel className="manage-deps-popup">
+                {/* Header */}
+                <div className="manage-deps-header">
+                  <div className="manage-deps-header-left">
+                    <div className="manage-deps-header-icon">
+                      <svg viewBox="0 0 24 24">
+                        <circle cx="18" cy="5" r="3" />
+                        <circle cx="6" cy="12" r="3" />
+                        <circle cx="18" cy="19" r="3" />
+                        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                        <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                      </svg>
+                    </div>
+                    <div className="manage-deps-title">Manage Dependencies</div>
+                  </div>
+                  <button type="button" onClick={onClose} className="manage-deps-close">
+                    ✕ Close
+                  </button>
+                </div>
+
+                {/* Context */}
+                <div className="manage-deps-context">
+                  <div className="manage-deps-context-name">{sourceName}</div>
+                  <div className="manage-deps-context-desc">
+                    Only <strong>Blocks</strong> type prevents starting.{' '}
+                    <strong>Depends on</strong> and <strong>Related to</strong> are informational.
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="manage-deps-content">
+                  {/* Current dependencies – outgoing & incoming */}
+                  <div>
+                    <div className="manage-deps-section-label">
+                      Zależności ({dependencies.length})
+                    </div>
+                    <div className="manage-deps-dep-list">
+                      {loadingDeps ? (
+                        <div className="manage-deps-dep-empty">Ładowanie...</div>
+                      ) : dependencies.length > 0 ? (
+                        <>
+                          {outgoing.length > 0 && (
+                            <>
+                              <div className="manage-deps-subsection">Zależy od</div>
+                              {outgoing.map((dep) => (
+                                <DepCard
+                                  key={dep.id}
+                                  dep={dep}
+                                  depType={dep.dependency_type as DependencyType}
+                                  onRemove={() => handleDeleteDependency(dep.id)}
+                                  isPending={deleteDependency.isPending}
+                                  DEPENDENCY_TYPE_LABELS={DEPENDENCY_TYPE_LABELS}
+                                />
+                              ))}
+                            </>
+                          )}
+                          {incoming.length > 0 && (
+                            <>
+                              <div className="manage-deps-subsection">Od tego zależy</div>
+                              {incoming.map((dep) => (
+                                <DepCard
+                                  key={dep.id}
+                                  dep={dep}
+                                  depType={dep.dependency_type as DependencyType}
+                                  onRemove={() => handleDeleteDependency(dep.id)}
+                                  isPending={deleteDependency.isPending}
+                                  DEPENDENCY_TYPE_LABELS={DEPENDENCY_TYPE_LABELS}
+                                />
+                              ))}
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <div className="manage-deps-dep-empty">
+                          Brak zależności. Możesz zacząć w dowolnym momencie.
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDeleteDependency(dep.id)}
-                    disabled={deleteDependency.isPending}
-                    className="text-red-400 hover:text-red-300"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+
+                  {/* Add new dependency */}
+                  <div>
+                    <div className="manage-deps-section-label">Add Dependency</div>
+                    <div className="manage-deps-add-form">
+                      {/* Type selector */}
+                      <div>
+                        <div className="manage-deps-form-label">Type</div>
+                        <div className="manage-deps-type-options">
+                          <button
+                            type="button"
+                            className={`manage-deps-type-opt t-blocks ${selectedType === 'blocks' ? 'selected' : ''}`}
+                            onClick={() => selectType('blocks')}
+                          >
+                            <div className="manage-deps-type-dot c-red" />
+                            <div>
+                              <div className="manage-deps-type-label">Blocks</div>
+                              <div className="manage-deps-type-desc">Must complete first</div>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            className={`manage-deps-type-opt t-depends ${selectedType === 'depends_on' ? 'selected' : ''}`}
+                            onClick={() => selectType('depends_on')}
+                          >
+                            <div className="manage-deps-type-dot c-amber" />
+                            <div>
+                              <div className="manage-deps-type-label">Depends on</div>
+                              <div className="manage-deps-type-desc">Should follow</div>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            className={`manage-deps-type-opt t-related ${selectedType === 'related_to' ? 'selected' : ''}`}
+                            onClick={() => selectType('related_to')}
+                          >
+                            <div className="manage-deps-type-dot c-indigo" />
+                            <div>
+                              <div className="manage-deps-type-label">Related to</div>
+                              <div className="manage-deps-type-desc">Informational link</div>
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Target picker (hierarchical) */}
+                      <div className="manage-deps-form-field">
+                        <div className="manage-deps-form-label">Cel zależności</div>
+                        <DependencyTargetPicker
+                          projectId={projectId}
+                          excludeEntityId={sourceId}
+                          selected={selectedTarget}
+                          onSelect={setSelectedTarget}
+                        />
+                      </div>
+
+                      {error && (
+                        <div className="manage-deps-error">
+                          <AlertCircle size={14} />
+                          {error}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        className="manage-deps-btn-add"
+                        onClick={handleAddDependency}
+                        disabled={!selectedTarget || createDependency.isPending}
+                      >
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                        >
+                          <line x1="12" y1="5" x2="12" y2="19" />
+                          <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        {createDependency.isPending ? 'Adding...' : 'Add Dependency'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-primary/60 italic">
-              No dependencies yet. This subtask can be started anytime.
-            </p>
-          )}
-        </div>
-
-        {/* Add New Dependency */}
-        <div className="border-t border-primary/20 pt-4">
-          <Label htmlFor="dependsOn">Add Dependency</Label>
-          <p className="text-xs text-primary/60 mb-3">
-            Select type and subtask
-          </p>
-
-          <div className="space-y-3">
-            <div>
-              <Label htmlFor="depType" className="text-xs">Type</Label>
-              <select
-                id="depType"
-                value={selectedType}
-                onChange={(e) => setSelectedType(e.target.value as DependencyType)}
-                className="w-full mt-1 px-4 py-2 rounded-lg text-sm glass-input focus:outline-none focus:ring-2 focus:ring-[rgba(0,188,212,0.5)]"
-              >
-                {(Object.keys(DEPENDENCY_TYPE_LABELS) as DependencyType[]).map((t) => (
-                  <option key={t} value={t}>{DEPENDENCY_TYPE_LABELS[t]}</option>
-                ))}
-              </select>
-            </div>
-            <select
-              id="dependsOn"
-              value={selectedSubtaskId}
-              onChange={(e) => {
-                setSelectedSubtaskId(e.target.value);
-                setError('');
-              }}
-              className="w-full px-4 py-2 rounded-lg text-sm glass-input focus:outline-none focus:ring-2 focus:ring-[rgba(0,188,212,0.5)]"
-              disabled={loadingAvailable}
-            >
-              <option value="">-- Select a subtask --</option>
-              {availableSubtasks?.map((subtask: any) => {
-                const mod = subtask.task?.module?.name || '';
-                const task = subtask.task?.name;
-                const parts = [mod, task, subtask.name].filter(Boolean);
-                const label = parts.join(' → ').replace(/ → - → /, ' → ');
-                return (
-                  <option key={subtask.id} value={subtask.id}>
-                    {label} ({subtask.status})
-                  </option>
-                );
-              })}
-            </select>
-
-            {error && (
-              <div className="flex items-start gap-2 text-red-400 text-sm">
-                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <p>{error}</p>
-              </div>
-            )}
-
-            <Button
-              type="button"
-              onClick={handleAddDependency}
-              disabled={!selectedSubtaskId || createDependency.isPending}
-              className="w-full"
-            >
-              {createDependency.isPending ? 'Adding...' : 'Add Dependency'}
-            </Button>
+              </HeadlessDialog.Panel>
+            </Transition.Child>
           </div>
         </div>
-
-        {/* Close Button */}
-        <div className="flex justify-end pt-2 border-t border-primary/20">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      </div>
-    </Dialog>
+      </HeadlessDialog>
+    </Transition>
   );
+
+  return createPortal(dialogContent, modalRoot);
 }

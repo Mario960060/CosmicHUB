@@ -2,6 +2,16 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase/client';
 import type { Subtask, WorkLog } from '@/types';
 
+// Minitask with subtasks (for task detail)
+export interface TaskMinitaskWithSubs {
+  id: string;
+  name: string;
+  due_date: string | null;
+  status: string;
+  priority_stars: number;
+  subtasks?: (Subtask & { work_logs?: { hours_spent: number }[] })[];
+}
+
 // Extended task with relations (for Workstation - tasks instead of subtasks)
 export interface TaskWithDetails {
   id: string;
@@ -23,6 +33,7 @@ export interface TaskWithDetails {
       name: string;
     };
   };
+  minitasks?: TaskMinitaskWithSubs[];
   subtasks?: (Subtask & {
     work_logs?: { hours_spent: number }[];
   })[];
@@ -73,6 +84,20 @@ export function useWorkstationTasks() {
             project:projects (
               id,
               name
+            )
+          ),
+          minitasks (
+            id,
+            name,
+            due_date,
+            status,
+            priority_stars,
+            subtasks (
+              id,
+              name,
+              status,
+              satellite_type,
+              work_logs (hours_spent)
             )
           ),
           subtasks (

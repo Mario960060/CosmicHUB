@@ -11,7 +11,8 @@ export type CanvasTool =
   | 'ellipse'
   | 'triangle'
   | 'diamond'
-  | 'freehand';
+  | 'freehand'
+  | 'eraser';
 
 interface UseCanvasKeyboardProps {
   onAddBlock: () => void;
@@ -61,27 +62,9 @@ export function useCanvasKeyboard({
       const active = document.activeElement;
       const isInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable);
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/89d4929e-cf8c-4162-a41e-04d63dc3fa83',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useCanvasKeyboard.ts:handleKeyDown-entry',message:'keydown fired',data:{key:e.key,activeTag:active?.tagName??'null',activeId:(active as HTMLElement)?.id??'',activeClass:(active as HTMLElement)?.className?.toString().slice(0,80)??'',isInput:!!isInput,isContentEditable:(active as HTMLElement)?.isContentEditable??false,containerExists:!!containerRef.current,containerContainsActive:containerRef.current?.contains(active)??false,activeIsBody:active===document.body},timestamp:Date.now(),hypothesisId:'H-A,H-B,H-C'})}).catch(()=>{});
-      // #endregion
+      if (isInput && e.key !== 'Escape') return;
 
-      if (isInput && e.key !== 'Escape') {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/89d4929e-cf8c-4162-a41e-04d63dc3fa83',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useCanvasKeyboard.ts:isInput-guard',message:'blocked by isInput guard',data:{key:e.key,activeTag:active?.tagName},timestamp:Date.now(),hypothesisId:'H-C'})}).catch(()=>{});
-        // #endregion
-        return;
-      }
-
-      if (!containerRef.current?.contains(active) && active !== document.body) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/89d4929e-cf8c-4162-a41e-04d63dc3fa83',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useCanvasKeyboard.ts:focus-guard',message:'blocked by focus/container guard',data:{key:e.key,activeTag:active?.tagName??'null',activeId:(active as HTMLElement)?.id??'',containerExists:!!containerRef.current,containerContainsActive:containerRef.current?.contains(active)??false,activeIsBody:active===document.body},timestamp:Date.now(),hypothesisId:'H-A,H-B'})}).catch(()=>{});
-        // #endregion
-        return;
-      }
-
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/89d4929e-cf8c-4162-a41e-04d63dc3fa83',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useCanvasKeyboard.ts:passed-guards',message:'key event passed all guards - executing action',data:{key:e.key},timestamp:Date.now(),hypothesisId:'passed'})}).catch(()=>{});
-      // #endregion
+      if (!containerRef.current?.contains(active) && active !== document.body) return;
 
       switch (e.key) {
         case 'v':
@@ -145,6 +128,13 @@ export function useCanvasKeyboard({
             onToolChange?.('freehand');
           }
           break;
+        case 'e':
+        case 'E':
+          if (!e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            onToolChange?.('eraser');
+          }
+          break;
         case 'Delete':
         case 'Backspace':
           if (hasSelection) {
@@ -179,7 +169,8 @@ export function useCanvasKeyboard({
           break;
         case 'c':
         case 'C':
-          if (e.ctrlKey || e.metaKey && hasSelection) {
+          if ((e.ctrlKey || e.metaKey) && hasSelection) {
+            e.preventDefault();
             onCopy();
           }
           break;

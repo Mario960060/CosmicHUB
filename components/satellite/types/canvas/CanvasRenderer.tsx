@@ -36,7 +36,7 @@ interface CanvasRendererProps {
   onBlockDoubleClick: (blockId: string) => void;
   onBlockTextChange: (blockId: string, text: string) => void;
   onBlockResizeStart: (blockId: string, handle: string, e: React.PointerEvent) => void;
-  onConnectionClick: (connId: string) => void;
+  onConnectionClick: (connId: string, e?: React.MouseEvent) => void;
   onConnectionContextMenu: (connId: string, e: React.MouseEvent) => void;
   onBackgroundPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
@@ -469,7 +469,7 @@ export function CanvasRenderer({
                 blocks={blocks}
                 shapes={shapes}
                 selected={selectedConnectionIds.has(conn.id)}
-                onClick={() => onConnectionClick(conn.id)}
+                onClick={(e) => onConnectionClick(conn.id, e)}
                 onContextMenu={(e) => onConnectionContextMenu(conn.id, e)}
                 onPointerDown={!isBeingRepositioned && onConnectionPointerDown ? (e, whichEnd) => onConnectionPointerDown(conn.id, whichEnd, e) : undefined}
                 dimmed={isBeingRepositioned}

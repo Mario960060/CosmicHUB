@@ -234,6 +234,12 @@ body {
   animation: commsPulse 2s ease-in-out infinite;
 }
 
+/* Comms chat input - placeholder visible when text is transparent for @mention overlay */
+.comms-mention-input::placeholder {
+  color: #64748b;
+  opacity: 0.9;
+}
+
 /* ============================================ */
 /* COSMIC SPACESHIP UI - Glassmorphism & Neon */
 /* ============================================ */

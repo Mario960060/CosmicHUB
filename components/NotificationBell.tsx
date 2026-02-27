@@ -36,7 +36,7 @@ export function NotificationBell() {
       right: `${dropdownPosition.right}px`,
       zIndex: 99999
     }}>
-      <NotificationDropdown onClose={() => setIsOpen(false)} />
+      <NotificationDropdown onClose={() => setIsOpen(false)} buttonRef={buttonRef} />
     </div>
   );
 

@@ -3,7 +3,40 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase/client';
 
-// Send message with optimistic update
+// Extract @mentions from content and return user IDs (mirrors findMentionMatch logic)
+function extractMentionedUserIds(content: string, people: { id: string; name: string }[]): string[] {
+  const ids: string[] = [];
+  let i = 0;
+  while (i < content.length) {
+    const atIdx = content.indexOf('@', i);
+    if (atIdx === -1) break;
+    const segment = content.slice(atIdx + 1);
+    const sorted = [...people].sort((a, b) => b.name.length - a.name.length);
+    let advance = 1;
+    for (const p of sorted) {
+      const segLower = segment.toLowerCase();
+      const nameLower = p.name.toLowerCase();
+      if (segLower.startsWith(nameLower)) {
+        advance = nameLower.length + (segment[nameLower.length] === ' ' ? 1 : 0);
+        if (!ids.includes(p.id)) ids.push(p.id);
+        break;
+      }
+      if (nameLower.startsWith(segLower)) {
+        advance = segment.length;
+        if (!ids.includes(p.id)) ids.push(p.id);
+        break;
+      }
+    }
+    if (advance === 1) {
+      const nextAt = segment.indexOf('@');
+      advance = nextAt === -1 ? segment.length + 1 : nextAt + 1;
+    }
+    i = atIdx + advance;
+  }
+  return ids;
+}
+
+// Send message with optimistic update; creates notifications for @mentions
 export function useSendMessage() {
   const queryClient = useQueryClient();
 
@@ -13,11 +46,13 @@ export function useSendMessage() {
       content,
       userId,
       userFullName,
+      mentionablePeople = [],
     }: {
       channelId: string;
       content: string;
       userId: string;
       userFullName?: string;
+      mentionablePeople?: { id: string; name: string }[];
     }) => {
       const { data, error } = await supabase
         .from('messages')
@@ -34,6 +69,21 @@ export function useSendMessage() {
         .single();
 
       if (error) throw error;
+
+      const mentionedIds = extractMentionedUserIds(content.trim(), mentionablePeople);
+      for (const mentionedUserId of mentionedIds) {
+        if (mentionedUserId === userId) continue;
+        await supabase.rpc('create_notification', {
+          p_user_id: mentionedUserId,
+          p_type: 'mention',
+          p_title: 'You were mentioned in chat',
+          p_message: (userFullName || 'Someone') + ' mentioned you in a message',
+          p_related_id: channelId,
+          p_related_type: 'channel',
+          p_actor_id: userId,
+        });
+      }
+
       return data;
     },
     onMutate: async (variables) => {
@@ -62,6 +112,8 @@ export function useSendMessage() {
       queryClient.invalidateQueries({ queryKey: ['chat-messages', variables.channelId] });
       queryClient.invalidateQueries({ queryKey: ['chat-channels'] });
       queryClient.invalidateQueries({ queryKey: ['chat-total-unread'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
     },
   });
 }
@@ -125,6 +177,46 @@ export function useGetOrCreateTaskChannel() {
     mutationFn: async ({ taskId }: { taskId: string }) => {
       const { data: channelId, error } = await supabase.rpc('get_or_create_task_channel', {
         p_task_id: taskId,
+      });
+
+      if (error) throw error;
+      return { id: channelId as string };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chat-channels'] });
+      queryClient.invalidateQueries({ queryKey: ['chat-tasks-hierarchy'] });
+    },
+  });
+}
+
+// Get or create minitask channel (konwersacja o minitasku)
+export function useGetOrCreateMinitaskChannel() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ minitaskId }: { minitaskId: string }) => {
+      const { data: channelId, error } = await supabase.rpc('get_or_create_minitask_channel', {
+        p_minitask_id: minitaskId,
+      });
+
+      if (error) throw error;
+      return { id: channelId as string };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chat-channels'] });
+      queryClient.invalidateQueries({ queryKey: ['chat-tasks-hierarchy'] });
+    },
+  });
+}
+
+// Get or create subtask channel (konwersacja o satelicie)
+export function useGetOrCreateSubtaskChannel() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ subtaskId }: { subtaskId: string }) => {
+      const { data: channelId, error } = await supabase.rpc('get_or_create_subtask_channel', {
+        p_subtask_id: subtaskId,
       });
 
       if (error) throw error;

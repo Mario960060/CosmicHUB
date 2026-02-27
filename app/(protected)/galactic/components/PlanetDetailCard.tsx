@@ -15,9 +15,9 @@ import {
   getStatusDotColor,
   getInitials,
   renderStars,
-  formatDependencyType,
   getDependencyTypeColor,
   HierarchyMetaRow,
+  DependencyRow,
 } from './DetailCardShared';
 import {
   calculateModuleProgress,
@@ -35,6 +35,9 @@ interface PlanetDetailCardProps {
   moduleId: string;
   onClose: () => void;
   onZoomIn?: () => void;
+  /** object = co wyświetlić w menu (planeta, task, subtask) */
+  onContextMenu?: (object: { id: string; type: 'module' | 'task' | 'subtask'; name: string; metadata?: Record<string, unknown> }, e: React.MouseEvent) => void;
+  onNavigateToSubtask?: (subtaskId: string) => void;
 }
 
 interface ModuleWithTasks {
@@ -112,7 +115,7 @@ function usePlanetDetails(moduleId: string | null) {
   });
 }
 
-export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCardProps) {
+export function PlanetDetailCard({ moduleId, onClose, onZoomIn, onContextMenu, onNavigateToSubtask }: PlanetDetailCardProps) {
   const { user } = useAuth();
   const [showAddProgress, setShowAddProgress] = useState(false);
   const [showAssignTeam, setShowAssignTeam] = useState(false);
@@ -202,8 +205,23 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
   const statusStyle = getStatusBadgeStyle(data.status || 'todo');
   const cardTheme = { border: 'rgba(0, 217, 255, 0.3)', header: '#00d9ff', accent: 'rgba(0, 217, 255, 0.15)', accentBorder: 'rgba(0, 217, 255, 0.4)' };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.target !== e.currentTarget && onContextMenu) {
+      onContextMenu({
+        id: moduleId,
+        type: 'module',
+        name: data.name,
+        metadata: { projectId, moduleId },
+      }, e);
+    }
+  };
+
   return (
     <div
+      onContextMenuCapture={(e) => { e.preventDefault(); }}
+      onContextMenu={handleContextMenu}
       style={{
         position: 'fixed',
         inset: 0,
@@ -374,6 +392,7 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
                   <div key={task.id} style={{ marginBottom: 8 }}>
                     <button
                       onClick={() => toggleTask(task.id)}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ id: task.id, type: 'task', name: task.name, metadata: { moduleId, taskId: task.id } }, e); }}
                       style={{
                         width: '100%',
                         display: 'flex',
@@ -406,7 +425,11 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
                     {taskExp && (
                       <div style={{ paddingLeft: 40 }}>
                         {(task.subtasks || []).map((st) => (
-                          <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                          <div
+                            key={st.id}
+                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ id: st.id, type: 'subtask', name: st.name, metadata: { moduleId, taskId: task.id, subtaskId: st.id } }, e); }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', cursor: 'context-menu' }}
+                          >
                             <SubtaskTypeIcon satelliteType={(st as { satellite_type?: string }).satellite_type} size={10} />
                             <span style={{ fontSize: 12 }}>{st.name}</span>
                           </div>
@@ -420,7 +443,11 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
                 <div style={{ marginTop: tasks.length > 0 ? 12 : 0, paddingTop: tasks.length > 0 ? 12 : 0, borderTop: tasks.length > 0 ? '1px solid rgba(255,255,255,0.1)' : 'none' }}>
                   <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginBottom: 6 }}>On module:</div>
                   {moduleSubtasks.map((st: { id: string; name: string; status: string; satellite_type?: string | null }) => (
-                    <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 16, padding: '4px 0' }}>
+                    <div
+                      key={st.id}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ id: st.id, type: 'subtask', name: st.name, metadata: { moduleId, subtaskId: st.id } }, e); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 16, padding: '4px 0', cursor: 'context-menu' }}
+                    >
                       <SubtaskTypeIcon satelliteType={st.satellite_type} size={10} />
                       <span>{st.name}</span>
                     </div>
@@ -443,19 +470,9 @@ export function PlanetDetailCard({ moduleId, onClose, onZoomIn }: PlanetDetailCa
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)' }}>
               {dependencies && dependencies.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {dependencies.map((dep) => {
-                    const from = dep.dependent_subtask?.name || '?';
-                    const to = dep.depends_on_subtask?.name || '?';
-                    const typ = dep.dependency_type || 'depends_on';
-                    const color = getDependencyTypeColor(typ);
-                    return (
-                      <div key={dep.id} style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                        <span style={{ color, fontSize: 11, fontWeight: 600 }}>{formatDependencyType(typ)}</span>
-                        {dep.note && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>{dep.note}</div>}
-                        <div style={{ marginTop: 2 }}>{from} → {to}</div>
-                      </div>
-                    );
-                  })}
+                  {dependencies.map((dep) => (
+                    <DependencyRow key={dep.id} dep={dep} onNavigateToSubtask={onNavigateToSubtask} />
+                  ))}
                 </div>
               ) : (
                 <div style={{ color: 'rgba(255,255,255,0.5)' }}>No dependencies between subtasks.</div>

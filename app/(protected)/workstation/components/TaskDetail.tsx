@@ -434,8 +434,10 @@ export function TaskDetail({ taskId }: TaskDetailProps) {
         <ManageDependenciesDialog
           open={showDependenciesDialog}
           onClose={() => setShowDependenciesDialog(false)}
-          subtaskId={task.id}
-          subtaskName={task.name}
+          projectId={(task as { parent_task?: { module?: { project?: { id?: string } } } })?.parent_task?.module?.project?.id ?? ''}
+          sourceType="subtask"
+          sourceId={task.id}
+          sourceName={task.name}
         />
       )}
     </div>

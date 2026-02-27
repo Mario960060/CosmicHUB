@@ -1,15 +1,28 @@
 'use client';
 
 import { useAuth } from '@/hooks/use-auth';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { NotificationBell } from './NotificationBell';
 import { LogOut, Settings, Users } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
+const navStyle = {
+  background: 'none',
+  border: 'none',
+  color: '#00d9ff',
+  fontSize: '14px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  padding: '8px 12px',
+  textDecoration: 'none',
+} as const;
+
 export function Header() {
   const { user, signOut } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [showMenu, setShowMenu] = useState(false);
   const [hoveredMenuItem, setHoveredMenuItem] = useState<string | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -179,38 +192,34 @@ export function Header() {
         }}>
           
           {/* LEWO */}
-          <div onClick={() => router.push('/dashboard')}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <Link href="/dashboard" prefetch
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}>
             <span style={{ fontSize: '24px' }}>🌌</span>
             <span style={{ fontFamily: 'Orbitron, sans-serif', fontSize: '20px', color: '#00d9ff', fontWeight: 600 }}>
               Cosmic Hub
             </span>
-          </div>
+          </Link>
 
           {/* PRAWO */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
             
-            {/* Navigation */}
-            <div style={{ display: 'flex', gap: '24px' }}>
-              <button onClick={() => router.push('/dashboard')}
-                style={{ background: 'none', border: 'none', color: '#00d9ff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', padding: '8px 12px' }}>
+            {/* Navigation – Link zamiast button+router.push, żeby uniknąć zawieszania przy szybkich klikach */}
+            <nav style={{ display: 'flex', gap: '24px' }}>
+              <Link href="/dashboard" prefetch style={{ ...navStyle, color: pathname === '/dashboard' ? '#00f0ff' : '#00d9ff' }}>
                 Dashboard
-              </button>
-              <button onClick={() => router.push('/workstation')}
-                style={{ background: 'none', border: 'none', color: '#00d9ff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', padding: '8px 12px' }}>
+              </Link>
+              <Link href="/workstation" prefetch style={{ ...navStyle, color: pathname?.startsWith('/workstation') ? '#00f0ff' : '#00d9ff' }}>
                 Workstation
-              </button>
-              <button onClick={() => router.push('/galactic')}
-                style={{ background: 'none', border: 'none', color: '#00d9ff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', padding: '8px 12px' }}>
+              </Link>
+              <Link href="/galactic" prefetch style={{ ...navStyle, color: pathname?.startsWith('/galactic') ? '#00f0ff' : '#00d9ff' }}>
                 Galactic
-              </button>
+              </Link>
               {['project_manager', 'admin'].includes(user.role) && (
-                <button onClick={() => router.push('/pm/projects')}
-                  style={{ background: 'none', border: 'none', color: '#00d9ff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', padding: '8px 12px' }}>
+                <Link href="/pm/projects" prefetch style={{ ...navStyle, color: pathname?.startsWith('/pm/projects') ? '#00f0ff' : '#00d9ff' }}>
                   Projects
-                </button>
+                </Link>
               )}
-            </div>
+            </nav>
 
             {/* Bell */}
             <NotificationBell />

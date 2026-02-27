@@ -36,6 +36,9 @@ export default function NotificationsPage() {
         case 'user':
           router.push('/admin/users');
           break;
+        case 'channel':
+          window.dispatchEvent(new CustomEvent('open-comms-channel', { detail: { channelId: notification.related_id } }));
+          break;
       }
     }
   };

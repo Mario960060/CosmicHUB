@@ -20,6 +20,7 @@ const SHORTCUTS: { section: string; items: ShortcutRow[] }[] = [
       { action: 'Triangle', shortcut: 'T' },
       { action: 'Diamond', shortcut: 'D' },
       { action: 'Freehand', shortcut: 'P' },
+      { action: 'Eraser', shortcut: 'E' },
     ],
   },
   {

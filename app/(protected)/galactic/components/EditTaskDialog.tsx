@@ -12,7 +12,6 @@ import { z } from 'zod';
 const taskSchema = z.object({
   name: z.string().min(2).max(200),
   description: z.string().max(1000).optional(),
-  estimatedHours: z.number().min(0).max(1000).optional(),
   priorityStars: z.number().min(0.5).max(3.0),
 });
 
@@ -34,8 +33,6 @@ export function EditTaskDialog({
   const updateTask = useUpdateTask();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [estimatedHours, setEstimatedHours] = useState('');
-  const [estimatedHoursFromMinitasks, setEstimatedHoursFromMinitasks] = useState(true);
   const [priorityStars, setPriorityStars] = useState('1.0');
   const [dueDate, setDueDate] = useState('');
   const [status, setStatus] = useState<'todo' | 'in_progress' | 'done'>('todo');
@@ -49,23 +46,17 @@ export function EditTaskDialog({
       setLoading(true);
       const supabase = createClient();
       Promise.all([
-        supabase.from('tasks').select('id, name, description, estimated_hours, priority_stars, due_date, status').eq('id', taskId).single(),
+        supabase.from('tasks').select('id, name, description, priority_stars, due_date, status').eq('id', taskId).single(),
       ]).then(([{ data, error }]) => {
         if (!error && data) {
           setName(data.name);
           setDescription(data.description || '');
-          const eh = data.estimated_hours;
-          setEstimatedHours(eh != null ? String(eh) : '');
-          setEstimatedHoursFromMinitasks(eh == null);
           setPriorityStars(data.priority_stars?.toString() ?? '1.0');
           setDueDate(data.due_date ? data.due_date.split('T')[0] : '');
           setStatus((data.status as 'todo' | 'in_progress' | 'done') || 'todo');
         } else if (initialData) {
           setName(initialData.name);
           setDescription(initialData.description || '');
-          const eh = initialData.estimatedHours;
-          setEstimatedHours(eh != null ? String(eh) : '');
-          setEstimatedHoursFromMinitasks(eh == null);
           setPriorityStars(initialData.priorityStars?.toString() ?? '1.0');
           setDueDate(initialData.dueDate ? initialData.dueDate.split('T')[0] : '');
           setStatus((initialData.status as 'todo' | 'in_progress' | 'done') || 'todo');
@@ -81,7 +72,6 @@ export function EditTaskDialog({
       taskSchema.parse({
         name,
         description: description || undefined,
-        estimatedHours: !estimatedHoursFromMinitasks && estimatedHours ? parseFloat(estimatedHours) : undefined,
         priorityStars: parseFloat(priorityStars),
       });
       await updateTask.mutateAsync({
@@ -89,7 +79,7 @@ export function EditTaskDialog({
         updates: {
           name,
           description: description || undefined,
-          estimated_hours: estimatedHoursFromMinitasks ? null : (estimatedHours ? parseFloat(estimatedHours) : null),
+          estimated_hours: null, // always calculate based on minitasks
           priority_stars: parseFloat(priorityStars),
           due_date: dueDate || null,
           status,
@@ -298,47 +288,9 @@ export function EditTaskDialog({
               />
             </div>
 
-            <div style={{ marginBottom: '24px' }}>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  marginBottom: '12px',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  color: 'rgba(255, 255, 255, 0.85)',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={estimatedHoursFromMinitasks}
-                  onChange={(e) => {
-                    setEstimatedHoursFromMinitasks(e.target.checked);
-                    if (e.target.checked) setEstimatedHours('');
-                  }}
-                  style={{ width: '18px', height: '18px', accentColor: '#00d9ff', cursor: 'pointer' }}
-                />
-                <span>Oblicz na podstawie szacowanych godzin mini zadań do tasków (księżyców)</span>
-              </label>
-              {!estimatedHoursFromMinitasks && (
-                <input
-                  type="number"
-                  value={estimatedHours}
-                  onChange={(e) => setEstimatedHours(e.target.value)}
-                  placeholder="np. 10"
-                  min="0"
-                  step="0.5"
-                  style={{
-                    ...inputBase,
-                    border: errors.estimatedHours ? '1px solid #ef4444' : '1px solid rgba(0, 217, 255, 0.3)',
-                  }}
-                />
-              )}
-              {!estimatedHoursFromMinitasks && errors.estimatedHours && (
-                <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>{errors.estimatedHours}</p>
-              )}
-            </div>
+            <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.5)', marginBottom: '24px' }}>
+              Szacowane godziny są obliczane na podstawie minitasków.
+            </p>
 
             <div style={{ marginBottom: '24px' }}>
               <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#00d9ff', marginBottom: '8px' }}>

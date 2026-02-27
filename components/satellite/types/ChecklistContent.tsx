@@ -19,6 +19,7 @@ interface ChecklistItem {
 interface ChecklistContentProps {
   subtaskId: string;
   satelliteData: Record<string, unknown>;
+  canReorder?: boolean;
 }
 
 function getItems(data: Record<string, unknown>): ChecklistItem[] {
@@ -35,7 +36,7 @@ function getItems(data: Record<string, unknown>): ChecklistItem[] {
   }));
 }
 
-export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentProps) {
+export function ChecklistContent({ subtaskId, satelliteData, canReorder = false }: ChecklistContentProps) {
   const { user } = useAuth();
   const invalidate = useInvalidateSatelliteQueries();
   const [items, setItems] = useState<ChecklistItem[]>(() => getItems(satelliteData));
@@ -193,9 +194,9 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
         {sortedItems.map((item, index) => (
           <div
             key={item.id}
-            draggable
-            onDragStart={() => handleDragStart(index)}
-            onDragOver={(e) => handleDragOver(e, index)}
+            draggable={canReorder}
+            onDragStart={() => canReorder && handleDragStart(index)}
+            onDragOver={(e) => canReorder && handleDragOver(e, index)}
             onDragEnd={handleDragEnd}
             style={{
               display: 'flex',
@@ -205,16 +206,18 @@ export function ChecklistContent({ subtaskId, satelliteData }: ChecklistContentP
               background: item.status === 'doing' ? 'rgba(0, 217, 255, 0.08)' : 'rgba(0, 0, 0, 0.2)',
               border: `1px solid ${item.status === 'doing' ? 'rgba(0, 217, 255, 0.3)' : 'rgba(0, 217, 255, 0.1)'}`,
               borderRadius: '8px',
-              cursor: 'grab',
+              cursor: canReorder ? 'grab' : 'default',
               opacity: draggedIndex === index ? 0.5 : 1,
             }}
           >
-            <div
-              style={{ cursor: 'grab', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <GripVertical size={16} />
-            </div>
+            {canReorder && (
+              <div
+                style={{ cursor: 'grab', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <GripVertical size={16} />
+              </div>
+            )}
             <button
               type="button"
               onClick={() => cycleStatus(item)}

@@ -151,7 +151,7 @@ export function useModules(projectId: string | null) {
         .from('modules')
         .select(`
           *,
-          tasks(*, subtasks(*)),
+          tasks(*, subtasks(*), minitasks(*)),
           module_members(
             *,
             user:users!user_id(id, full_name, email, avatar_url, role)
@@ -403,10 +403,11 @@ export interface DependencyWithSubtasks {
     id: string;
     name: string;
     status: string;
+    satellite_type?: string | null;
   };
 }
 
-// Fetch dependencies for a subtask
+// Fetch dependencies for a subtask (legacy – by dependent_task_id)
 export function useDependencies(subtaskId: string | null) {
   return useQuery({
     queryKey: ['dependencies', subtaskId],
@@ -425,7 +426,8 @@ export function useDependencies(subtaskId: string | null) {
           depends_on_subtask:subtasks!dependencies_depends_on_task_id_fkey(
             id,
             name,
-            status
+            status,
+            satellite_type
           )
         `)
         .eq('dependent_task_id', subtaskId)
@@ -435,6 +437,140 @@ export function useDependencies(subtaskId: string | null) {
       return (data || []) as DependencyWithSubtasks[];
     },
     enabled: !!subtaskId,
+  });
+}
+
+export interface DependencyWithTarget {
+  id: string;
+  dependency_type: string;
+  source_type: string;
+  source_id: string;
+  target_type: string;
+  target_id: string;
+  target_name: string;
+  target_status?: string;
+  target_satellite_type?: string | null;
+  /** 'outgoing' = entity depends on other | 'incoming' = other depends on entity */
+  direction?: 'outgoing' | 'incoming';
+}
+
+export interface EntityDependenciesResult {
+  /** Entity depends on these (source = entity) */
+  outgoing: DependencyWithTarget[];
+  /** These depend on entity (target = entity) */
+  incoming: DependencyWithTarget[];
+  /** All unique deps, for count */
+  all: DependencyWithTarget[];
+}
+
+async function resolveEntityNames(
+  items: { type: string; id: string }[]
+): Promise<Map<string, { name: string; status?: string; satellite_type?: string | null }>> {
+  const result = new Map<string, { name: string; status?: string; satellite_type?: string | null }>();
+  const byType = new Map<string, string[]>();
+  for (const { type, id } of items) {
+    if (!byType.has(type)) byType.set(type, []);
+    byType.get(type)!.push(id);
+  }
+  for (const [ttype, ids] of byType) {
+    const uniq = [...new Set(ids)];
+    if (ttype === 'subtask') {
+      const { data: st } = await supabase.from('subtasks').select('id, name, status, satellite_type').in('id', uniq);
+      (st || []).forEach((s: any) =>
+        result.set(`${ttype}:${s.id}`, { name: s.name, status: s.status, satellite_type: s.satellite_type })
+      );
+    } else if (ttype === 'task') {
+      const { data: t } = await supabase.from('tasks').select('id, name').in('id', uniq);
+      (t || []).forEach((s: any) => result.set(`${ttype}:${s.id}`, { name: s.name }));
+    } else if (ttype === 'module') {
+      const { data: m } = await supabase.from('modules').select('id, name').in('id', uniq);
+      (m || []).forEach((s: any) => result.set(`${ttype}:${s.id}`, { name: s.name }));
+    } else if (ttype === 'minitask') {
+      const { data: mt } = await supabase.from('minitasks').select('id, name').in('id', uniq);
+      (mt || []).forEach((s: any) => result.set(`${ttype}:${s.id}`, { name: s.name }));
+    } else if (ttype === 'project') {
+      const { data: p } = await supabase.from('projects').select('id, name').in('id', uniq);
+      (p || []).forEach((s: any) => result.set(`${ttype}:${s.id}`, { name: s.name }));
+    }
+  }
+  return result;
+}
+
+// Fetch dependencies for any entity – BOTH outgoing (entity depends on X) and incoming (X depends on entity)
+export function useDependenciesForEntity(entityType: string | null, entityId: string | null) {
+  return useQuery({
+    queryKey: ['dependencies-entity', entityType, entityId],
+    queryFn: async () => {
+      if (!entityType || !entityId) return { outgoing: [], incoming: [], all: [] } as EntityDependenciesResult;
+
+      const [outgoingRes, incomingRes] = await Promise.all([
+        supabase
+          .from('dependencies')
+          .select('id, dependency_type, source_type, source_id, target_type, target_id')
+          .eq('source_type', entityType)
+          .eq('source_id', entityId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('dependencies')
+          .select('id, dependency_type, source_type, source_id, target_type, target_id')
+          .eq('target_type', entityType)
+          .eq('target_id', entityId)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      const outgoingRows = outgoingRes.data || [];
+      const incomingRows = incomingRes.data || [];
+      if (outgoingRes.error) throw outgoingRes.error;
+      if (incomingRes.error) throw incomingRes.error;
+
+      const toResolve = [
+        ...outgoingRows.map((r: any) => ({ type: r.target_type, id: r.target_id })),
+        ...incomingRows.map((r: any) => ({ type: r.source_type, id: r.source_id })),
+      ];
+      const resolved = await resolveEntityNames(toResolve);
+
+      const outgoing: DependencyWithTarget[] = outgoingRows.map((r: any) => {
+        const info = resolved.get(`${r.target_type}:${r.target_id}`);
+        return {
+          id: r.id,
+          dependency_type: r.dependency_type,
+          source_type: r.source_type,
+          source_id: r.source_id,
+          target_type: r.target_type,
+          target_id: r.target_id,
+          target_name: info?.name ?? 'Unknown',
+          target_status: info?.status,
+          target_satellite_type: info?.satellite_type,
+          direction: 'outgoing',
+        } as DependencyWithTarget;
+      });
+
+      const incoming: DependencyWithTarget[] = incomingRows.map((r: any) => {
+        const info = resolved.get(`${r.source_type}:${r.source_id}`);
+        return {
+          id: r.id,
+          dependency_type: r.dependency_type,
+          source_type: r.source_type,
+          source_id: r.source_id,
+          target_type: r.target_type,
+          target_id: r.target_id,
+          target_name: info?.name ?? 'Unknown',
+          target_status: info?.status,
+          target_satellite_type: info?.satellite_type,
+          direction: 'incoming',
+        } as DependencyWithTarget;
+      });
+
+      const seen = new Set<string>();
+      const all = [...outgoing, ...incoming].filter((d) => {
+        if (seen.has(d.id)) return false;
+        seen.add(d.id);
+        return true;
+      });
+
+      return { outgoing, incoming, all } as EntityDependenciesResult;
+    },
+    enabled: !!entityType && !!entityId,
   });
 }
 
@@ -588,5 +724,161 @@ export function useAvailableSubtasksForDependency(currentSubtaskId: string | nul
       return results;
     },
     enabled: !!currentSubtaskId,
+  });
+}
+
+// Hierarchy for dependency target picker: Project → Modules → Tasks → Minitasks/Subtasks
+export interface DependencyTargetProject {
+  id: string;
+  name: string;
+  type: 'project';
+  projectMinitasks: { id: string; name: string; type: 'minitask' }[];
+  modules: DependencyTargetModule[];
+}
+
+export interface DependencyTargetModule {
+  id: string;
+  name: string;
+  type: 'module';
+  moduleMinitasks: { id: string; name: string; type: 'minitask' }[];
+  tasks: DependencyTargetTask[];
+}
+
+export interface DependencyTargetTask {
+  id: string;
+  name: string;
+  type: 'task';
+  minitasks: { id: string; name: string; type: 'minitask'; subtasks: { id: string; name: string; type: 'subtask' }[] }[];
+  subtasks: { id: string; name: string; type: 'subtask' }[];
+}
+
+export function useProjectHierarchyForDependency(projectId: string | null, excludeEntityId?: string) {
+  return useQuery({
+    queryKey: ['project-hierarchy-dependency', projectId, excludeEntityId],
+    queryFn: async () => {
+      if (!projectId) return null;
+
+      const { data: project, error: projErr } = await supabase
+        .from('projects')
+        .select('id, name')
+        .eq('id', projectId)
+        .single();
+      if (projErr || !project) return null;
+
+      const { data: modules } = await supabase
+        .from('modules')
+        .select('id, name')
+        .eq('project_id', projectId)
+        .order('order_index', { ascending: true });
+      const moduleIds = (modules || []).map((m: any) => m.id);
+
+      const { data: tasks } = await supabase
+        .from('tasks')
+        .select('id, name, module_id')
+        .in('module_id', moduleIds)
+        .order('created_at', { ascending: false });
+      const taskIds = (tasks || []).map((t: any) => t.id);
+
+      const { data: taskMinitasks } = await supabase
+        .from('minitasks')
+        .select('id, name, task_id')
+        .in('task_id', taskIds);
+      let moduleMinitasks: any[] = [];
+      if (moduleIds.length > 0) {
+        const { data: modMins } = await supabase
+          .from('minitasks')
+          .select('id, name, module_id')
+          .in('module_id', moduleIds)
+          .is('task_id', null);
+        moduleMinitasks = modMins || [];
+      }
+      const { data: projectMinitasks } = await supabase
+        .from('minitasks')
+        .select('id, name')
+        .eq('project_id', projectId)
+        .is('module_id', null)
+        .is('task_id', null);
+
+      const minitaskIds = [
+        ...(taskMinitasks || []).map((m: any) => m.id),
+        ...(moduleMinitasks || []).map((m: any) => m.id),
+        ...(projectMinitasks || []).map((m: any) => m.id),
+      ];
+      let subtasksByParent = new Map<string, { id: string; name: string }[]>();
+      if (taskIds.length > 0) {
+        const { data: stTask } = await supabase
+          .from('subtasks')
+          .select('id, name, parent_id')
+          .in('parent_id', taskIds);
+        (stTask || []).forEach((s: any) => {
+          const list = subtasksByParent.get(s.parent_id) || [];
+          list.push({ id: s.id, name: s.name });
+          subtasksByParent.set(s.parent_id, list);
+        });
+      }
+      if (minitaskIds.length > 0) {
+        const { data: stMinitask } = await supabase
+          .from('subtasks')
+          .select('id, name, minitask_id')
+          .in('minitask_id', minitaskIds);
+        const byMinitask = new Map<string, { id: string; name: string }[]>();
+        (stMinitask || []).forEach((s: any) => {
+          const list = byMinitask.get(s.minitask_id) || [];
+          list.push({ id: s.id, name: s.name });
+          byMinitask.set(s.minitask_id, list);
+        });
+        subtasksByParent = new Map([...subtasksByParent, ...byMinitask]);
+      }
+
+      const exclude = excludeEntityId ? new Set([excludeEntityId]) : new Set<string>();
+
+      const modMap = new Map((modules || []).map((m: any) => [m.id, m]));
+      const taskMap = new Map((tasks || []).map((t: any) => [t.id, t]));
+      const minitasksByTask = new Map<string, any[]>();
+      (taskMinitasks || []).forEach((m: any) => {
+        const list = minitasksByTask.get(m.task_id) || [];
+        list.push(m);
+        minitasksByTask.set(m.task_id, list);
+      });
+
+      const result: DependencyTargetProject = {
+        id: project.id,
+        name: project.name,
+        type: 'project',
+        projectMinitasks: (projectMinitasks || [])
+          .filter((m: any) => !exclude.has(m.id))
+          .map((m: any) => ({ id: m.id, name: m.name, type: 'minitask' as const })),
+        modules: (modules || []).map((mod: any) => {
+          const modTasks = (tasks || []).filter((t: any) => t.module_id === mod.id);
+          return {
+            id: mod.id,
+            name: mod.name,
+            type: 'module' as const,
+            moduleMinitasks: (moduleMinitasks || [])
+              .filter((m: any) => m.module_id === mod.id && !exclude.has(m.id))
+              .map((m: any) => ({ id: m.id, name: m.name, type: 'minitask' as const })),
+            tasks: modTasks.map((t: any) => {
+              const tMinitasks = minitasksByTask.get(t.id) || [];
+              return {
+                id: t.id,
+                name: t.name,
+                type: 'task' as const,
+                minitasks: tMinitasks
+                  .filter((m: any) => !exclude.has(m.id))
+                  .map((m: any) => ({
+                    id: m.id,
+                    name: m.name,
+                    type: 'minitask' as const,
+                    subtasks: (subtasksByParent.get(m.id) || []).filter((s) => !exclude.has(s.id)).map((s) => ({ ...s, type: 'subtask' as const })),
+                  })),
+                subtasks: (subtasksByParent.get(t.id) || []).filter((s) => !exclude.has(s.id)).map((s) => ({ ...s, type: 'subtask' as const })),
+              };
+            }),
+          };
+        }),
+      };
+      return result;
+    },
+    enabled: !!projectId,
   });
 }

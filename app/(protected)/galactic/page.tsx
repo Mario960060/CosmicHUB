@@ -5,12 +5,14 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { GalacticScene } from './components/GalacticScene';
 import { GalaxyCanvas } from './components/GalaxyCanvas';
 import { GalaxyPalette, type PaletteItem } from './components/GalaxyPalette';
 import { GalaxyContextMenu, type ContextMenuAction } from './components/GalaxyContextMenu';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useGalacticData } from '@/hooks/use-galactic-data';
+import { supabase } from '@/lib/supabase/client';
 import { useProjects, useProjectMembers } from '@/lib/pm/queries';
 import { useSaveGalaxyPositions, useGalaxyPositions, type SavePositionPayload, copyPositionsToNewContext } from './hooks/use-galaxy-positions';
 import { useGalaxyEditor } from './hooks/use-galaxy-editor';
@@ -48,11 +50,15 @@ export default function GalacticPage() {
 
   const { data: projects, isLoading: loadingProjects } = useProjects();
   const initialProjectId = searchParams.get('project') || undefined;
+  const urlModule = searchParams.get('module') || undefined;
+  const urlTask = searchParams.get('task') || undefined;
+  const urlMinitask = searchParams.get('minitask') || undefined;
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(initialProjectId);
-  const [selectedModuleId, setSelectedModuleId] = useState<string | undefined>(undefined);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(undefined);
-  const [selectedMinitaskId, setSelectedMinitaskId] = useState<string | undefined>(undefined);
+  const [selectedModuleId, setSelectedModuleId] = useState<string | undefined>(urlModule);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(urlTask);
+  const [selectedMinitaskId, setSelectedMinitaskId] = useState<string | undefined>(urlMinitask);
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
   const [showProjectDropdown, setShowProjectDropdown] = useState(false);
   const [positionOverrides, setPositionOverrides] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [contextMenu, setContextMenu] = useState<{
@@ -85,9 +91,9 @@ export default function GalacticPage() {
   } | null>(null);
   const [pendingDependency, setPendingDependency] = useState<{
     sourceEntityId: string;
-    sourceEntityType: 'module' | 'task' | 'subtask' | 'minitask';
+    sourceEntityType: 'module' | 'task' | 'subtask' | 'minitask' | 'project';
     targetEntityId: string;
-    targetEntityType: 'module' | 'task' | 'subtask' | 'minitask';
+    targetEntityType: 'module' | 'task' | 'subtask' | 'minitask' | 'project';
     targetEntityName: string;
   } | null>(null);
   const [pendingPortalDependency, setPendingPortalDependency] = useState<{
@@ -148,10 +154,37 @@ export default function GalacticPage() {
     }
   }, [projects, selectedProjectId]);
 
+  // Sync view state from URL (handles browser back / mouse back – cofanie w przeglądarce wraca do poprzedniego systemu)
+  useEffect(() => {
+    setSelectedModuleId(urlModule);
+    setSelectedTaskId(urlTask);
+    setSelectedMinitaskId(urlMinitask);
+  }, [urlModule, urlTask, urlMinitask]);
+
   // Clear multi-selection when switching project or zoom level
   useEffect(() => {
     setSelectedObjectIds(new Set());
   }, [selectedProjectId, selectedModuleId, selectedTaskId, selectedMinitaskId]);
+
+  /** Nawigacja w galaktyce – push do historii, żeby przycisk Wstecz w przeglądarce/myszce cofał do poprzedniego systemu */
+  const navigateToView = useCallback(
+    (opts: { projectId?: string; moduleId?: string; taskId?: string; minitaskId?: string }) => {
+      const params = new URLSearchParams();
+      const pid = opts.projectId ?? selectedProjectId;
+      if (pid) params.set('project', pid);
+      if (opts.moduleId) params.set('module', opts.moduleId);
+      if (opts.taskId) params.set('task', opts.taskId);
+      if (opts.minitaskId) params.set('minitask', opts.minitaskId);
+      const q = params.toString();
+      router.push(q ? `/galactic?${q}` : '/galactic');
+    },
+    [router, selectedProjectId]
+  );
+
+  /** Cofnij do poprzedniego systemu (przycisk Wstecz w przeglądarce/myszce) */
+  const goBackInGalaxy = useCallback(() => {
+    router.back();
+  }, [router]);
 
   // Determine zoom level based on what's selected
   const zoomLevel = selectedMinitaskId ? 'minitask' : selectedTaskId ? 'task' : selectedModuleId ? 'module' : 'project';
@@ -195,6 +228,33 @@ export default function GalacticPage() {
     }
     return [...base, ...extras];
   }, [data?.objects, positionOverrides, newEntityMeta]);
+
+  // Resolve full breadcrumb hierarchy: minitask -> task -> module -> project
+  const breadcrumbIds = useMemo(() => {
+    const currentMinitask = selectedMinitaskId
+      ? (data?.objects ?? []).find((o) => o.type === 'minitask' && o.id === selectedMinitaskId)
+      : null;
+    const moduleId = selectedModuleId ?? (currentMinitask?.metadata?.moduleId as string | undefined);
+    const taskId = selectedTaskId ?? (currentMinitask?.metadata?.taskId as string | undefined);
+    return { moduleId, taskId };
+  }, [selectedModuleId, selectedTaskId, selectedMinitaskId, data?.objects]);
+
+  const { data: breadcrumbParents } = useQuery({
+    queryKey: ['breadcrumb-parents', breadcrumbIds.moduleId, breadcrumbIds.taskId],
+    queryFn: async () => {
+      const result: { module?: { id: string; name: string }; task?: { id: string; name: string } } = {};
+      if (breadcrumbIds.moduleId) {
+        const { data: m } = await supabase.from('modules').select('id, name').eq('id', breadcrumbIds.moduleId).single();
+        result.module = m ?? undefined;
+      }
+      if (breadcrumbIds.taskId) {
+        const { data: t } = await supabase.from('tasks').select('id, name').eq('id', breadcrumbIds.taskId).single();
+        result.task = t ?? undefined;
+      }
+      return result;
+    },
+    enabled: !!(breadcrumbIds.moduleId || breadcrumbIds.taskId),
+  });
 
   const handlePositionChange = useCallback((objectId: string, x: number, y: number) => {
     setPositionOverrides((prev) => {
@@ -473,13 +533,14 @@ export default function GalacticPage() {
     }
   }, [selectedProjectId, selectedModuleId, selectedTaskId, selectedMinitaskId, data?.objects, positionOverrides, existingPositions, newEntityMeta, savePositions, queryClient, zoomLevel]);
 
-  const handleDoneEdit = useCallback(async () => {
+  const handleDoneEdit = useCallback(async (): Promise<boolean> => {
     try {
       await performSave();
       clearCreatedEntities();
       exitEditMode();
+      return true;
     } catch {
-      // Stay in edit mode; toast already shown
+      return false;
     }
   }, [performSave, clearCreatedEntities, exitEditMode]);
 
@@ -495,7 +556,7 @@ export default function GalacticPage() {
             targetModuleId: object.metadata.portalTargetModuleId,
             targetModuleName: object.metadata.portalTargetModuleName || object.name,
           });
-        } else if ((object.type === 'module' || object.type === 'task' || object.type === 'subtask' || object.type === 'minitask') && object.id !== src.entityId) {
+        } else if ((object.type === 'project' || object.type === 'module' || object.type === 'task' || object.type === 'subtask' || object.type === 'minitask') && object.id !== src.entityId) {
           setPendingDependency({
             sourceEntityId: src.entityId,
             sourceEntityType: src.entityType,
@@ -530,128 +591,72 @@ export default function GalacticPage() {
     [isEditMode, performSave, connectionModeForSubtaskId, connectionModeSource, cancelConnectionMode, selectedTaskId, selectedModuleId, selectedMinitaskId]
   );
 
-  const handleBackToSolar = useCallback(async () => {
-    if (isEditMode) {
-      try {
-        await performSave();
-      } catch {
-        return;
-      }
+  /** Przy przełączaniu modułów/tasków: zawsze zapisuj i przejdź – bez okna potwierdzenia */
+  const confirmAndExitEditIfNeeded = useCallback(async (): Promise<boolean> => {
+    if (!isEditMode) return true;
+    try {
+      await performSave();
+      clearCreatedEntities();
+      exitEditMode();
+      return true;
+    } catch {
+      return false;
     }
-    setSelectedModuleId(undefined);
-    setSelectedTaskId(undefined);
-    setSelectedMinitaskId(undefined);
-  }, [isEditMode, performSave]);
+  }, [isEditMode, performSave, clearCreatedEntities, exitEditMode]);
+
+  const handleBackToSolar = useCallback(async () => {
+    if (!(await confirmAndExitEditIfNeeded())) return;
+    goBackInGalaxy();
+  }, [confirmAndExitEditIfNeeded, goBackInGalaxy]);
 
   const handleBackToModule = useCallback(async () => {
-    if (isEditMode) {
-      try {
-        await performSave();
-      } catch {
-        return;
-      }
-    }
-    setSelectedTaskId(undefined);
-    setSelectedMinitaskId(undefined);
-  }, [isEditMode, performSave]);
+    if (!(await confirmAndExitEditIfNeeded())) return;
+    goBackInGalaxy();
+  }, [confirmAndExitEditIfNeeded, goBackInGalaxy]);
 
   const handleBackToTask = useCallback(async () => {
-    if (isEditMode) {
-      try {
-        await performSave();
-      } catch {
-        return;
-      }
-    }
-    setSelectedMinitaskId(undefined);
-  }, [isEditMode, performSave]);
+    if (!(await confirmAndExitEditIfNeeded())) return;
+    goBackInGalaxy();
+  }, [confirmAndExitEditIfNeeded, goBackInGalaxy]);
 
-  /** Back from minitask: always go to parent system (task/module/solar) based on minitask's actual parent, not navigation history */
+  /** Back from minitask: cofa do poprzedniego systemu (historia przeglądarki) */
   const handleBackFromMinitask = useCallback(
     async (minitask: CanvasObject) => {
-      if (isEditMode) {
-        try {
-          await performSave();
-        } catch {
-          return;
-        }
-      }
-      const taskId = (minitask.metadata?.taskId ?? (minitask as any).task_id) as string | undefined;
-      const moduleId = (minitask.metadata?.moduleId ?? (minitask as any).module_id) as string | undefined;
-      const projectId = (minitask.metadata?.projectId ?? (minitask as any).project_id) as string | undefined;
-      setSelectedMinitaskId(undefined);
-      if (taskId && moduleId) {
-        setSelectedTaskId(taskId);
-        setSelectedModuleId(moduleId);
-      } else if (moduleId) {
-        setSelectedTaskId(undefined);
-        setSelectedModuleId(moduleId);
-      } else if (projectId) {
-        setSelectedTaskId(undefined);
-        setSelectedModuleId(undefined);
-      }
+      if (!(await confirmAndExitEditIfNeeded())) return;
+      goBackInGalaxy();
     },
-    [isEditMode, performSave]
+    [confirmAndExitEditIfNeeded, goBackInGalaxy]
   );
 
   // Save before portal navigation so position overrides (e.g. in asteroid system) are not lost
   const handlePortalClick = useCallback(
     async (moduleId: string) => {
-      if (isEditMode) {
-        try {
-          await performSave();
-        } catch {
-          return;
-        }
-      }
-      setSelectedModuleId(moduleId);
-      setSelectedTaskId(undefined);
-      setSelectedMinitaskId(undefined);
+      if (!(await confirmAndExitEditIfNeeded())) return;
+      navigateToView({ moduleId });
     },
-    [isEditMode, performSave]
+    [confirmAndExitEditIfNeeded, navigateToView]
   );
   const handleTaskPortalClick = useCallback(
     async (taskId: string) => {
-      if (isEditMode) {
-        try {
-          await performSave();
-        } catch {
-          return;
-        }
-      }
-      setSelectedTaskId(taskId);
-      setSelectedMinitaskId(undefined);
+      if (!(await confirmAndExitEditIfNeeded())) return;
+      navigateToView({ moduleId: selectedModuleId, taskId });
     },
-    [isEditMode, performSave]
+    [confirmAndExitEditIfNeeded, navigateToView, selectedModuleId]
   );
   const handleMinitaskPortalClick = useCallback(
     async (minitaskId: string) => {
-      if (isEditMode) {
-        try {
-          await performSave();
-        } catch {
-          return;
-        }
-      }
-      setSelectedMinitaskId(minitaskId);
+      if (!(await confirmAndExitEditIfNeeded())) return;
+      navigateToView({ moduleId: selectedModuleId, taskId: selectedTaskId, minitaskId });
     },
-    [isEditMode, performSave]
+    [confirmAndExitEditIfNeeded, navigateToView, selectedModuleId, selectedTaskId]
   );
 
   const handleProjectChange = useCallback(async (projectId: string) => {
-    if (isEditMode) {
-      try {
-        await performSave();
-      } catch {
-        return;
-      }
-    }
+    if (isEditMode && !(await confirmAndExitEditIfNeeded())) return;
     setSelectedProjectId(projectId);
-    setSelectedModuleId(undefined);
-    setSelectedTaskId(undefined);
-    setSelectedMinitaskId(undefined);
     setShowProjectDropdown(false);
-  }, [isEditMode, performSave]);
+    navigateToView({ projectId });
+  }, [confirmAndExitEditIfNeeded, navigateToView]);
 
   const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -750,7 +755,7 @@ export default function GalacticPage() {
               parentProjectId: selectedProjectId,
               parentProjectName: projects?.find((p) => p.id === selectedProjectId)?.name ?? 'Project',
             });
-          } else if (selectedModuleId && !selectedTaskId) {
+          } else if (selectedModuleId && !selectedTaskId && selectedProjectId) {
             const moduleObj = objectsToRender.find((o) => o.type === 'module');
             setPendingDrop({
               item,
@@ -758,8 +763,9 @@ export default function GalacticPage() {
               y: canvasY,
               parentModuleId: selectedModuleId,
               parentModuleName: moduleObj?.name ?? 'Module',
+              parentProjectId: selectedProjectId,
             });
-          } else if (selectedTaskId) {
+          } else if (selectedTaskId && selectedProjectId) {
             const task = objectsToRender.find((o) => o.type === 'task' && o.id === selectedTaskId);
             setPendingDrop({
               item,
@@ -767,6 +773,7 @@ export default function GalacticPage() {
               y: canvasY,
               parentTaskId: selectedTaskId,
               parentTaskName: task?.name ?? 'Task',
+              parentProjectId: selectedProjectId,
             });
           } else {
             toast.error('Zoom into a project, module or task to add asteroids (minitasks).');
@@ -914,6 +921,71 @@ export default function GalacticPage() {
       setContextMenu(null);
 
       switch (action) {
+        case 'go-to-element':
+          if (isEditMode) {
+            try {
+              await performSave();
+            } catch {
+              return;
+            }
+          }
+          setProjectDetailId(null);
+          setPlanetDetailId(null);
+          setMoonDetailId(null);
+          setAsteroidDetailId(null);
+          setSubtaskModalId(null);
+          if (object.type === 'project') {
+            navigateToView({});
+            setProjectDetailId(object.id);
+          } else if (object.type === 'module') {
+            navigateToView({ moduleId: object.id });
+            setPlanetDetailId(object.id);
+          } else if (object.type === 'task') {
+            const moduleId = (object.metadata?.moduleId ?? selectedModuleId) as string | undefined;
+            if (moduleId) {
+              navigateToView({ moduleId, taskId: object.id });
+              setMoonDetailId(object.id);
+            }
+          } else if (object.type === 'minitask') {
+            const moduleId = (object.metadata?.moduleId ?? selectedModuleId) as string | undefined;
+            const taskId = (object.metadata?.taskId ?? selectedTaskId) as string | undefined;
+            if (moduleId && taskId) {
+              navigateToView({ moduleId, taskId, minitaskId: object.id });
+              setAsteroidDetailId(object.id);
+            } else if (moduleId) {
+              navigateToView({ moduleId, minitaskId: object.id });
+              setAsteroidDetailId(object.id);
+            } else if (selectedProjectId) {
+              navigateToView({ minitaskId: object.id });
+              setAsteroidDetailId(object.id);
+            }
+          } else if (object.type === 'subtask') {
+            let moduleId = object.metadata?.moduleId as string | undefined;
+            let taskId = object.metadata?.taskId as string | undefined;
+            const minitaskId = object.metadata?.minitaskId as string | undefined;
+            const projectId = object.metadata?.projectId as string | undefined;
+            if (!moduleId && minitaskId) {
+              const parent = objectsToRender.find((o) => o.type === 'minitask' && o.id === minitaskId);
+              if (parent) {
+                moduleId = parent.metadata?.moduleId as string | undefined;
+                taskId = taskId ?? (parent.metadata?.taskId as string | undefined);
+              }
+            }
+            if (minitaskId && taskId && moduleId) {
+              navigateToView({ moduleId, taskId, minitaskId });
+              setSubtaskModalId(object.id);
+            } else if (taskId && moduleId) {
+              navigateToView({ moduleId, taskId });
+              setSubtaskModalId(object.id);
+            } else if (moduleId) {
+              navigateToView({ moduleId });
+              setSubtaskModalId(object.id);
+            } else if (projectId) {
+              navigateToView({});
+              setSubtaskModalId(object.id);
+            }
+          }
+          break;
         case 'edit-project':
           setEditingObject(object);
           break;
@@ -949,7 +1021,7 @@ export default function GalacticPage() {
           break;
       }
     },
-    [startConnectionMode, selectedProjectId, selectedModuleId, selectedTaskId, selectedObjectIds, objectsToRender]
+    [isEditMode, performSave, selectedProjectId, selectedModuleId, selectedTaskId, startConnectionMode, selectedObjectIds, objectsToRender, navigateToView]
   );
 
   // Group delete via Delete key
@@ -1059,23 +1131,17 @@ export default function GalacticPage() {
       await savePositions.mutateAsync(positions);
 
       if (target.type === 'module') {
-        setSelectedModuleId(target.id);
-        setSelectedTaskId(undefined);
-        setSelectedMinitaskId(undefined);
+        navigateToView({ moduleId: target.id });
       } else if (target.type === 'task') {
-        setSelectedModuleId(target.moduleId);
-        setSelectedTaskId(target.id);
-        setSelectedMinitaskId(undefined);
+        navigateToView({ moduleId: target.moduleId, taskId: target.id });
       } else {
-        setSelectedModuleId(undefined);
-        setSelectedTaskId(undefined);
-        setSelectedMinitaskId(undefined);
+        navigateToView({});
       }
       setSelectedObjectIds(new Set(entities.map((e) => e.id)));
       enterEditMode();
       toast.success(`Przeniesiono ${entities.length} element${entities.length > 1 ? 'ów' : ''} pomyślnie`);
     },
-    [selectedModuleId, selectedTaskId, selectedMinitaskId, existingPositions, savePositions, enterEditMode]
+    [selectedModuleId, selectedTaskId, selectedMinitaskId, existingPositions, savePositions, enterEditMode, navigateToView]
   );
 
   if (loadingProjects) {
@@ -1167,8 +1233,8 @@ export default function GalacticPage() {
             You need access to at least one project to explore the galactic map. Create or join a
             project to begin your cosmic journey.
           </p>
-          <button
-            onClick={() => router.push('/pm/projects')}
+          <Link
+            href="/pm/projects"
             onMouseEnter={() => setHoveredButton('create')}
             onMouseLeave={() => setHoveredButton(null)}
             style={{
@@ -1187,10 +1253,11 @@ export default function GalacticPage() {
                 hoveredButton === 'create' ? '0 8px 30px rgba(0, 240, 255, 0.5)' : 'none',
               letterSpacing: '1px',
               textTransform: 'uppercase',
+              textDecoration: 'none',
             }}
           >
             Launch Projects
-          </button>
+          </Link>
         </div>
       </div>
     );
@@ -1319,202 +1386,100 @@ export default function GalacticPage() {
           borderBottom: '1px solid rgba(0, 240, 255, 0.1)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-        {/* Back Button (if in asteroid zoom) - always go to parent system (task/module/solar) */}
-        {selectedMinitaskId && (() => {
-          const currentMinitask = objectsToRender.find((o) => o.type === 'minitask' && o.id === selectedMinitaskId);
-          const isProjectLevelMinitask = currentMinitask?.metadata?.projectId && !currentMinitask?.metadata?.moduleId && !currentMinitask?.metadata?.taskId;
-          const isModuleLevelMinitask = currentMinitask?.metadata?.moduleId && !currentMinitask?.metadata?.taskId;
-          const backLabel = isProjectLevelMinitask ? '← Back to Solar System' : isModuleLevelMinitask ? '← Back to Module System' : '← Back to Task';
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: 0, flex: 1 }}>
+        {/* Breadcrumb path: project / module / task / minitask – pełna hierarchia rodzic→dziecko */}
+        {selectedProjectId && selectedProject && (() => {
+          const { moduleId, taskId } = breadcrumbIds;
+          const moduleName = breadcrumbParents?.module?.name ?? (moduleId ? (data?.objects.find((o) => o.type === 'module' && o.id === moduleId)?.name ?? objectsToRender.find((o) => o.type === 'module' && o.id === moduleId)?.name) : null) ?? null;
+          const taskName = breadcrumbParents?.task?.name ?? (taskId ? (data?.objects.find((o) => o.type === 'task' && o.id === taskId)?.name ?? objectsToRender.find((o) => o.type === 'task' && o.id === taskId)?.name) : null) ?? null;
+          const minitaskName = selectedMinitaskId ? (data?.objects.find((o) => o.id === selectedMinitaskId)?.name ?? objectsToRender.find((o) => o.id === selectedMinitaskId)?.name) : null;
+          const isAtProjectLevel = !moduleId && !taskId && !selectedMinitaskId;
+          const segments: { label: string; onClick?: () => void }[] = [
+            { label: selectedProject.name, onClick: isAtProjectLevel ? undefined : async () => { if (await confirmAndExitEditIfNeeded()) goBackInGalaxy(); } },
+          ];
+          if (moduleId && moduleName) {
+            const isCurrent = !selectedMinitaskId && !selectedTaskId && selectedModuleId;
+            segments.push({
+              label: moduleName,
+              onClick: isCurrent ? undefined : async () => {
+                if (!(await confirmAndExitEditIfNeeded())) return;
+                navigateToView({ moduleId });
+              },
+            });
+          }
+          if (taskId && taskName) {
+            const isCurrent = !selectedMinitaskId && selectedTaskId;
+            segments.push({
+              label: taskName,
+              onClick: isCurrent ? undefined : async () => {
+                if (!(await confirmAndExitEditIfNeeded())) return;
+                navigateToView({ moduleId, taskId });
+              },
+            });
+          }
+          if (selectedMinitaskId && minitaskName) {
+            segments.push({ label: minitaskName });
+          }
           return (
-            <button
-              onClick={() => currentMinitask ? handleBackFromMinitask(currentMinitask) : handleBackToTask()}
-              onMouseEnter={() => setHoveredButton('back-task')}
-              onMouseLeave={() => setHoveredButton(null)}
+            <nav
               style={{
-                padding: '8px 16px',
-                background: hoveredButton === 'back-task'
-                  ? 'rgba(0, 240, 255, 0.15)'
-                  : 'rgba(21, 27, 46, 0.8)',
-                backdropFilter: 'blur(20px)',
-                border: hoveredButton === 'back-task'
-                  ? '1px solid rgba(0, 240, 255, 0.5)'
-                  : '1px solid rgba(0, 240, 255, 0.2)',
-                borderRadius: '12px',
-                color: '#00f0ff',
-                fontFamily: 'Exo 2, sans-serif',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                boxShadow: hoveredButton === 'back-task'
-                  ? '0 0 20px rgba(0, 240, 255, 0.3)'
-                  : 'none',
-              }}
-            >
-              {backLabel}
-            </button>
-          );
-        })()}
-        {/* Back Button (if in task zoom, not asteroid zoom) */}
-        {selectedTaskId && !selectedMinitaskId && (
-          <button
-            onClick={() => handleBackToModule()}
-            onMouseEnter={() => setHoveredButton('back-module')}
-            onMouseLeave={() => setHoveredButton(null)}
-            style={{
-              padding: '8px 16px',
-              background: hoveredButton === 'back-module'
-                ? 'rgba(0, 240, 255, 0.15)'
-                : 'rgba(21, 27, 46, 0.8)',
-              backdropFilter: 'blur(20px)',
-              border: hoveredButton === 'back-module'
-                ? '1px solid rgba(0, 240, 255, 0.5)'
-                : '1px solid rgba(0, 240, 255, 0.2)',
-              borderRadius: '12px',
-              color: '#00f0ff',
-              fontFamily: 'Exo 2, sans-serif',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              boxShadow: hoveredButton === 'back-module'
-                ? '0 0 20px rgba(0, 240, 255, 0.3)'
-                : 'none',
-            }}
-          >
-            ← Back to Module System
-          </button>
-        )}
-        {/* Back Button (if in module zoom, not task zoom) */}
-        {selectedModuleId && !selectedTaskId && (
-          <button
-            onClick={() => handleBackToSolar()}
-            onMouseEnter={() => setHoveredButton('back')}
-            onMouseLeave={() => setHoveredButton(null)}
-            style={{
-              padding: '8px 16px',
-              background: hoveredButton === 'back'
-                ? 'rgba(0, 240, 255, 0.15)'
-                : 'rgba(21, 27, 46, 0.8)',
-              backdropFilter: 'blur(20px)',
-              border: hoveredButton === 'back'
-                ? '1px solid rgba(0, 240, 255, 0.5)'
-                : '1px solid rgba(0, 240, 255, 0.2)',
-              borderRadius: '12px',
-              color: '#00f0ff',
-              fontFamily: 'Exo 2, sans-serif',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              boxShadow: hoveredButton === 'back'
-                ? '0 0 20px rgba(0, 240, 255, 0.3)'
-                : 'none',
-            }}
-          >
-            ← Back to Solar System
-          </button>
-        )}
-
-          {projects.length > 1 && (
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => setShowProjectDropdown(!showProjectDropdown)}
-              onMouseEnter={() => setHoveredButton('dropdown')}
-              onMouseLeave={() => setHoveredButton(null)}
-              style={{
-                padding: '8px 16px',
-                background:
-                  hoveredButton === 'dropdown' || showProjectDropdown
-                    ? 'rgba(0, 240, 255, 0.15)'
-                    : 'rgba(21, 27, 46, 0.8)',
-                backdropFilter: 'blur(20px)',
-                border:
-                  hoveredButton === 'dropdown' || showProjectDropdown
-                    ? '1px solid rgba(0, 240, 255, 0.5)'
-                    : '1px solid rgba(0, 240, 255, 0.2)',
-                borderRadius: '12px',
-                color: '#00f0ff',
-                fontFamily: 'Exo 2, sans-serif',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px',
-                boxShadow:
-                  hoveredButton === 'dropdown' || showProjectDropdown
-                    ? '0 0 25px rgba(0, 240, 255, 0.3)'
-                    : 'none',
+                gap: '6px',
+                fontFamily: 'Exo 2, sans-serif',
+                fontSize: '14px',
+                color: 'rgba(255, 255, 255, 0.85)',
+                flexWrap: 'wrap',
+                minWidth: 0,
               }}
             >
-              <Zap size={16} />
-              <span>Change System</span>
-              <ChevronDown
-                size={16}
-                style={{
-                  transform: showProjectDropdown ? 'rotate(180deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.3s ease',
-                }}
-              />
-            </button>
-
-            {showProjectDropdown && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  marginTop: '8px',
-                  minWidth: '200px',
-                  maxWidth: '280px',
-                  background: 'rgba(21, 27, 46, 0.95)',
-                  backdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(0, 240, 255, 0.3)',
-                  borderRadius: '12px',
-                  overflow: 'hidden',
-                  boxShadow: '0 8px 30px rgba(0, 240, 255, 0.2)',
-                }}
-              >
-                {projects.map((project) => (
-                  <button
-                    key={project.id}
-                    onClick={() => handleProjectChange(project.id)}
-                    onMouseEnter={() => setHoveredButton(`proj-${project.id}`)}
-                    onMouseLeave={() => setHoveredButton(null)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 16px',
-                      background:
-                        hoveredButton === `proj-${project.id}`
-                          ? 'rgba(0, 240, 255, 0.1)'
-                          : 'transparent',
-                      border: 'none',
-                      borderBottom:
-                        projects.indexOf(project) < projects.length - 1
-                          ? '1px solid rgba(0, 240, 255, 0.1)'
-                          : 'none',
-                      color: selectedProjectId === project.id ? '#00f0ff' : 'rgba(255, 255, 255, 0.7)',
-                      fontFamily: 'Exo 2, sans-serif',
-                      fontSize: '14px',
-                      fontWeight: selectedProjectId === project.id ? '600' : '400',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      textAlign: 'left',
-                      wordWrap: 'break-word',
-                      overflowWrap: 'break-word',
-                      maxWidth: '220px',
-                    }}
-                  >
-                    {project.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          )}
+              {segments.map((seg, i) => (
+                <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {i > 0 && <span style={{ color: 'rgba(0, 240, 255, 0.5)' }}>/</span>}
+                  {seg.onClick ? (
+                    <button
+                      onClick={seg.onClick}
+                      onMouseEnter={() => setHoveredButton(`breadcrumb-${i}`)}
+                      onMouseLeave={() => setHoveredButton(null)}
+                      style={{
+                        padding: '4px 8px',
+                        background: hoveredButton === `breadcrumb-${i}` ? 'rgba(0, 240, 255, 0.15)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '8px',
+                        color: '#00f0ff',
+                        fontFamily: 'Exo 2, sans-serif',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        maxWidth: '180px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {seg.label}
+                    </button>
+                  ) : (
+                    <span
+                      style={{
+                        padding: '4px 8px',
+                        color: 'rgba(255, 255, 255, 0.9)',
+                        fontWeight: '600',
+                        maxWidth: '180px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {seg.label}
+                    </span>
+                  )}
+                </span>
+              ))}
+            </nav>
+          );
+        })()}
         </div>
 
         {/* Title – wyśrodkowany absolutnie w środku paska */}
@@ -1560,7 +1525,7 @@ export default function GalacticPage() {
           </h1>
         </div>
 
-        {/* Right side: Edit / Save / Cancel / Workstation */}
+        {/* Right side: Edit Galaxy / Change System / Go to Workstation */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {canEditGalaxy && !isEditMode && (
             <button
@@ -1617,10 +1582,117 @@ export default function GalacticPage() {
               Done
             </button>
           )}
+          {projects.length > 1 && (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowProjectDropdown(!showProjectDropdown)}
+                onMouseEnter={() => setHoveredButton('dropdown')}
+                onMouseLeave={() => setHoveredButton(null)}
+                style={{
+                  padding: '8px 16px',
+                  background:
+                    hoveredButton === 'dropdown' || showProjectDropdown
+                      ? 'rgba(0, 240, 255, 0.15)'
+                      : 'rgba(21, 27, 46, 0.8)',
+                  backdropFilter: 'blur(20px)',
+                  border:
+                    hoveredButton === 'dropdown' || showProjectDropdown
+                      ? '1px solid rgba(0, 240, 255, 0.5)'
+                      : '1px solid rgba(0, 240, 255, 0.2)',
+                  borderRadius: '12px',
+                  color: '#00f0ff',
+                  fontFamily: 'Exo 2, sans-serif',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  boxShadow:
+                    hoveredButton === 'dropdown' || showProjectDropdown
+                      ? '0 0 25px rgba(0, 240, 255, 0.3)'
+                      : 'none',
+                }}
+              >
+                <Zap size={16} />
+                <span>Change System</span>
+                <ChevronDown
+                  size={16}
+                  style={{
+                    transform: showProjectDropdown ? 'rotate(180deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.3s ease',
+                  }}
+                />
+              </button>
+              {showProjectDropdown && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: '8px',
+                    minWidth: '200px',
+                    maxWidth: '280px',
+                    background: 'rgba(21, 27, 46, 0.95)',
+                    backdropFilter: 'blur(20px)',
+                    border: '1px solid rgba(0, 240, 255, 0.3)',
+                    borderRadius: '12px',
+                    overflow: 'hidden',
+                    boxShadow: '0 8px 30px rgba(0, 240, 255, 0.2)',
+                  }}
+                >
+                  {projects.map((project) => (
+                    <button
+                      key={project.id}
+                      onClick={() => handleProjectChange(project.id)}
+                      onMouseEnter={() => setHoveredButton(`proj-${project.id}`)}
+                      onMouseLeave={() => setHoveredButton(null)}
+                      style={{
+                        width: '100%',
+                        padding: '12px 16px',
+                        background:
+                          hoveredButton === `proj-${project.id}`
+                            ? 'rgba(0, 240, 255, 0.1)'
+                            : 'transparent',
+                        border: 'none',
+                        borderBottom:
+                          projects.indexOf(project) < projects.length - 1
+                            ? '1px solid rgba(0, 240, 255, 0.1)'
+                            : 'none',
+                        color: selectedProjectId === project.id ? '#00f0ff' : 'rgba(255, 255, 255, 0.7)',
+                        fontFamily: 'Exo 2, sans-serif',
+                        fontSize: '14px',
+                        fontWeight: selectedProjectId === project.id ? '600' : '400',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        textAlign: 'left',
+                        wordWrap: 'break-word',
+                        overflowWrap: 'break-word',
+                        maxWidth: '220px',
+                      }}
+                    >
+                      {project.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <button
+            disabled={isNavigating}
             onClick={async () => {
-              if (isEditMode) await handleDoneEdit();
-              router.push('/workstation');
+              if (isNavigating) return;
+              setIsNavigating(true);
+              try {
+                if (isEditMode) {
+                  const completed = await handleDoneEdit();
+                  if (!completed) return;
+                }
+                router.push('/workstation');
+              } finally {
+                setIsNavigating(false);
+              }
             }}
             onMouseEnter={() => setHoveredButton('workstation')}
             onMouseLeave={() => setHoveredButton(null)}
@@ -1636,7 +1708,8 @@ export default function GalacticPage() {
               fontWeight: '700',
               letterSpacing: '1px',
               textTransform: 'uppercase',
-              cursor: 'pointer',
+              cursor: isNavigating ? 'wait' : 'pointer',
+              opacity: isNavigating ? 0.7 : 1,
               transition: 'all 0.3s ease',
               boxShadow: hoveredButton === 'workstation' ? '0 0 25px rgba(0, 240, 255, 0.4)' : 'none',
             }}
@@ -1892,10 +1965,11 @@ export default function GalacticPage() {
           onSuccess={handleCreateModuleSuccess}
         />
       )}
-      {pendingDrop?.item.entityType === 'task' && selectedModuleId && (
+      {pendingDrop?.item.entityType === 'task' && selectedModuleId && selectedProjectId && (
         <CreateTaskDialog
           open={true}
           onClose={handleCreateModalClose}
+          projectId={selectedProjectId}
           moduleId={selectedModuleId}
           initialSpacecraftType={pendingDrop.item.spacecraftType}
           onSuccess={handleCreateTaskSuccess}
@@ -1917,6 +1991,25 @@ export default function GalacticPage() {
         <SunDetailCard
           projectId={projectDetailId}
           onClose={() => setProjectDetailId(null)}
+          onNavigateToSubtask={(subtaskId) => {
+            setProjectDetailId(null);
+            setSubtaskModalId(subtaskId);
+          }}
+          onContextMenu={(obj, e) => {
+            setContextMenu({
+              object: {
+                id: obj.id,
+                type: obj.type as 'project',
+                name: obj.name,
+                position: { x: 0, y: 0 },
+                radius: 60,
+                color: '#00d9ff',
+                metadata: obj.metadata ?? {},
+              },
+              x: e.clientX,
+              y: e.clientY,
+            });
+          }}
           onZoomIn={async (moduleId) => {
             if (isEditMode) {
               try {
@@ -1926,7 +2019,7 @@ export default function GalacticPage() {
               }
             }
             setProjectDetailId(null);
-            setSelectedModuleId(moduleId);
+            navigateToView({ moduleId });
           }}
         />
       )}
@@ -1936,6 +2029,26 @@ export default function GalacticPage() {
         <PlanetDetailCard
           moduleId={planetDetailId}
           onClose={() => setPlanetDetailId(null)}
+          onNavigateToSubtask={(subtaskId) => {
+            setPlanetDetailId(null);
+            setSubtaskModalId(subtaskId);
+          }}
+          onContextMenu={(obj, e) => {
+            const mod = objectsToRender.find((o) => o.type === 'module' && o.id === obj.id);
+            setContextMenu({
+              object: {
+                id: obj.id,
+                type: obj.type as 'module' | 'task' | 'subtask',
+                name: obj.name,
+                position: { x: 0, y: 0 },
+                radius: obj.type === 'subtask' ? 20 : 30,
+                color: mod?.color ?? '#a855f7',
+                metadata: { projectId: selectedProjectId, ...obj.metadata },
+              },
+              x: e.clientX,
+              y: e.clientY,
+            });
+          }}
           onZoomIn={async () => {
             if (isEditMode) {
               try {
@@ -1945,7 +2058,7 @@ export default function GalacticPage() {
               }
             }
             setPlanetDetailId(null);
-            setSelectedModuleId(planetDetailId);
+            navigateToView({ moduleId: planetDetailId });
           }}
         />
       )}
@@ -1955,6 +2068,26 @@ export default function GalacticPage() {
         <MoonDetailCard
           taskId={moonDetailId}
           onClose={() => setMoonDetailId(null)}
+          onNavigateToSubtask={(subtaskId) => {
+            setMoonDetailId(null);
+            setSubtaskModalId(subtaskId);
+          }}
+          onContextMenu={(obj, e) => {
+            const task = objectsToRender.find((o) => (o.type === 'task' || o.type === 'subtask') && o.id === obj.id);
+            setContextMenu({
+              object: {
+                id: obj.id,
+                type: obj.type as 'task' | 'minitask' | 'subtask',
+                name: obj.name,
+                position: { x: 0, y: 0 },
+                radius: obj.type === 'subtask' ? 20 : 25,
+                color: task?.color ?? '#00d9ff',
+                metadata: { moduleId: selectedModuleId ?? (obj.metadata?.moduleId as string | undefined), taskId: moonDetailId, ...obj.metadata },
+              },
+              x: e.clientX,
+              y: e.clientY,
+            });
+          }}
           onZoomIn={async (moduleId) => {
             if (isEditMode) {
               try {
@@ -1965,8 +2098,7 @@ export default function GalacticPage() {
             }
             const taskIdToSelect = moonDetailId;
             setMoonDetailId(null);
-            setSelectedModuleId(moduleId);
-            setSelectedTaskId(taskIdToSelect);
+            navigateToView({ moduleId, taskId: taskIdToSelect });
           }}
         />
       )}
@@ -1976,6 +2108,31 @@ export default function GalacticPage() {
         <AsteroidDetailCard
           minitaskId={asteroidDetailId}
           onClose={() => setAsteroidDetailId(null)}
+          onNavigateToSubtask={(subtaskId) => {
+            setAsteroidDetailId(null);
+            setSubtaskModalId(subtaskId);
+          }}
+          onContextMenu={(obj, e) => {
+            const asteroid = objectsToRender.find((o) => (o.type === 'minitask' || o.type === 'subtask') && o.id === obj.id);
+            setContextMenu({
+              object: {
+                id: obj.id,
+                type: obj.type as 'minitask' | 'subtask',
+                name: obj.name,
+                position: { x: 0, y: 0 },
+                radius: obj.type === 'subtask' ? 20 : 25,
+                color: asteroid?.color ?? '#a78b5a',
+                metadata: {
+                  ...(obj.metadata as Record<string, string | undefined> | undefined),
+                  moduleId: selectedModuleId ?? (obj.metadata?.moduleId as string | undefined),
+                  taskId: selectedTaskId ?? (obj.metadata?.taskId as string | undefined),
+                  minitaskId: asteroidDetailId,
+                },
+              },
+              x: e.clientX,
+              y: e.clientY,
+            });
+          }}
           onZoomIn={
             selectedTaskId || selectedModuleId || (selectedProjectId && objectsToRender.some((o) => o.type === 'module'))
               ? async () => {
@@ -1987,15 +2144,17 @@ export default function GalacticPage() {
                     }
                   }
                   setAsteroidDetailId(null);
-                  if (!selectedModuleId && selectedProjectId) {
+                  let moduleId = selectedModuleId;
+                  let taskId = selectedTaskId;
+                  if (!moduleId && selectedProjectId) {
                     const asteroid = objectsToRender.find((o) => o.type === 'minitask' && o.id === asteroidDetailId);
                     const isProjectLevel = asteroid?.metadata?.projectId && !asteroid?.metadata?.moduleId && !asteroid?.metadata?.taskId;
                     if (!isProjectLevel) {
                       const firstModuleId = objectsToRender.find((o) => o.type === 'module')?.id;
-                      if (firstModuleId) setSelectedModuleId(firstModuleId);
+                      if (firstModuleId) moduleId = firstModuleId;
                     }
                   }
-                  setSelectedMinitaskId(asteroidDetailId);
+                  navigateToView({ moduleId, taskId, minitaskId: asteroidDetailId });
                 }
               : undefined
           }
@@ -2034,6 +2193,32 @@ export default function GalacticPage() {
 
       {subtaskModalId && (
         <div
+          onContextMenuCapture={(e) => e.preventDefault()}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.target !== e.currentTarget) {
+              const sub = objectsToRender.find((o) => o.type === 'subtask' && o.id === subtaskModalId);
+              setContextMenu({
+                object: {
+                  id: subtaskModalId,
+                  type: 'subtask',
+                  name: sub?.name ?? 'Subtask',
+                  position: { x: 0, y: 0 },
+                  radius: 20,
+                  color: sub?.color ?? '#00d9ff',
+                  metadata: {
+                    taskId: sub?.metadata?.taskId ?? selectedTaskId,
+                    minitaskId: sub?.metadata?.minitaskId,
+                    moduleId: sub?.metadata?.moduleId ?? selectedModuleId,
+                    projectId: sub?.metadata?.projectId ?? selectedProjectId,
+                  },
+                },
+                x: e.clientX,
+                y: e.clientY,
+              });
+            }
+          }}
           style={{
             position: 'fixed',
             inset: 0,

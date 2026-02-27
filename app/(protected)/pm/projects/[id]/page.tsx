@@ -5,11 +5,14 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useProject, useModules, useProjectMembers } from '@/lib/pm/queries';
+import { useDeleteProject } from '@/lib/pm/mutations';
 import { CreateModuleDialog } from './components/CreateModuleDialog';
 import { CreateTaskDialog } from './components/CreateTaskDialog';
-import { CreateSubtaskDialog } from './components/CreateSubtaskDialog';
+import { CreateMinitaskDialog } from '@/app/(protected)/galactic/components/CreateMinitaskDialog';
 import { AssignTeamModal } from './components/AssignTeamModal';
-import { Calendar, Users, Rocket, Satellite, Plus, UserPlus } from 'lucide-react';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
+import { Calendar, Users, Rocket, Satellite, Plus, UserPlus, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -19,9 +22,13 @@ export default function ProjectDetailPage() {
   const { data: project, isLoading: loadingProject } = useProject(projectId);
   const { data: modules, isLoading: loadingModules } = useModules(projectId);
   const { data: projectMembers } = useProjectMembers(projectId);
+  const deleteProject = useDeleteProject();
+  const { confirm, ConfirmDialog: ConfirmDialogEl } = useConfirm();
   const [showCreateModule, setShowCreateModule] = useState(false);
   const [selectedModuleForTask, setSelectedModuleForTask] = useState<string | null>(null);
-  const [selectedTaskForSubtask, setSelectedTaskForSubtask] = useState<{ id: string; name: string } | null>(null);
+  const [selectedTaskForMinitask, setSelectedTaskForMinitask] = useState<{ id: string; name: string } | null>(null);
+  const [selectedModuleForMinitask, setSelectedModuleForMinitask] = useState<{ id: string; name: string } | null>(null);
+  const [showAddMinitaskToProject, setShowAddMinitaskToProject] = useState(false);
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
   const [hoveredBackButton, setHoveredBackButton] = useState(false);
   const [hoveredTask, setHoveredTask] = useState<string | null>(null);
@@ -68,7 +75,7 @@ export default function ProjectDetailPage() {
   return (
     <div style={{ minHeight: '100vh', padding: '96px 48px 48px' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-        {/* Top bar: Back left, Assign team right */}
+        {/* Top bar: Back left, Assign team + Delete right */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <button 
             onClick={() => router.push('/pm/projects')}
@@ -89,29 +96,73 @@ export default function ProjectDetailPage() {
           >
             ← Back to Projects
           </button>
-          <button
-            onClick={() => setShowAssignProjectTeam(true)}
-            onMouseEnter={() => setHoveredButton('assign-project')}
-            onMouseLeave={() => setHoveredButton(null)}
-            style={{
-              padding: '10px 20px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: hoveredButton === 'assign-project' ? 'rgba(21, 27, 46, 0.8)' : 'rgba(21, 27, 46, 0.6)',
-              backdropFilter: 'blur(20px)',
-              border: hoveredButton === 'assign-project' ? '1px solid rgba(0, 217, 255, 0.5)' : '1px solid rgba(0, 217, 255, 0.2)',
-              borderRadius: '8px',
-              color: '#00d9ff',
-              fontSize: '14px',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              boxShadow: hoveredButton === 'assign-project' ? '0 0 20px rgba(0, 217, 255, 0.3)' : 'none',
-            }}
-          >
-            <UserPlus size={18} />
-            Assign team
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              onClick={() => setShowAssignProjectTeam(true)}
+              onMouseEnter={() => setHoveredButton('assign-project')}
+              onMouseLeave={() => setHoveredButton(null)}
+              style={{
+                padding: '10px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: hoveredButton === 'assign-project' ? 'rgba(21, 27, 46, 0.8)' : 'rgba(21, 27, 46, 0.6)',
+                backdropFilter: 'blur(20px)',
+                border: hoveredButton === 'assign-project' ? '1px solid rgba(0, 217, 255, 0.5)' : '1px solid rgba(0, 217, 255, 0.2)',
+                borderRadius: '8px',
+                color: '#00d9ff',
+                fontSize: '14px',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                boxShadow: hoveredButton === 'assign-project' ? '0 0 20px rgba(0, 217, 255, 0.3)' : 'none',
+              }}
+            >
+              <UserPlus size={18} />
+              Assign team
+            </button>
+            <button
+              onClick={async () => {
+                const ok = await confirm({
+                  title: 'Usuń projekt',
+                  message: `Czy na pewno chcesz usunąć projekt "${project?.name}"? Ta operacja jest nieodwracalna.`,
+                  confirmLabel: 'Usuń',
+                  cancelLabel: 'Anuluj',
+                  variant: 'danger',
+                });
+                if (!ok) return;
+                try {
+                  await deleteProject.mutateAsync({ projectId });
+                  toast.success('Projekt został usunięty');
+                  router.push('/pm/projects');
+                } catch (err) {
+                  toast.error('Nie udało się usunąć projektu', {
+                    description: err instanceof Error ? err.message : 'Nieznany błąd',
+                  });
+                }
+              }}
+              disabled={deleteProject.isPending}
+              onMouseEnter={() => setHoveredButton('delete-project')}
+              onMouseLeave={() => setHoveredButton(null)}
+              style={{
+                padding: '10px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: hoveredButton === 'delete-project' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.1)',
+                backdropFilter: 'blur(20px)',
+                border: hoveredButton === 'delete-project' ? '1px solid rgba(239, 68, 68, 0.6)' : '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '8px',
+                color: '#ef4444',
+                fontSize: '14px',
+                cursor: deleteProject.isPending ? 'not-allowed' : 'pointer',
+                transition: 'all 0.3s ease',
+                opacity: deleteProject.isPending ? 0.6 : 1,
+              }}
+            >
+              <Trash2 size={18} />
+              Delete project
+            </button>
+          </div>
         </div>
 
         {/* Project Header */}
@@ -243,27 +294,50 @@ export default function ProjectDetailPage() {
             </div>
             Modules
           </h2>
-          <button
-            onClick={() => setShowCreateModule(true)}
-            onMouseEnter={() => setHoveredButton('create-module')}
-            onMouseLeave={() => setHoveredButton(null)}
-            style={{
-              padding: '12px 24px',
-              background: hoveredButton === 'create-module' ? 'rgba(21, 27, 46, 0.8)' : 'rgba(21, 27, 46, 0.6)',
-              backdropFilter: 'blur(20px)',
-              border: hoveredButton === 'create-module' ? '1px solid rgba(0, 217, 255, 0.5)' : '1px solid rgba(0, 217, 255, 0.2)',
-              borderRadius: '8px',
-              color: '#00d9ff',
-              fontFamily: 'Orbitron, sans-serif',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              boxShadow: hoveredButton === 'create-module' ? '0 0 20px rgba(0, 217, 255, 0.3)' : 'none',
-            }}
-          >
-            + Create Module
-          </button>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setShowCreateModule(true)}
+              onMouseEnter={() => setHoveredButton('create-module')}
+              onMouseLeave={() => setHoveredButton(null)}
+              style={{
+                padding: '12px 24px',
+                background: hoveredButton === 'create-module' ? 'rgba(21, 27, 46, 0.8)' : 'rgba(21, 27, 46, 0.6)',
+                backdropFilter: 'blur(20px)',
+                border: hoveredButton === 'create-module' ? '1px solid rgba(0, 217, 255, 0.5)' : '1px solid rgba(0, 217, 255, 0.2)',
+                borderRadius: '8px',
+                color: '#00d9ff',
+                fontFamily: 'Orbitron, sans-serif',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                boxShadow: hoveredButton === 'create-module' ? '0 0 20px rgba(0, 217, 255, 0.3)' : 'none',
+              }}
+            >
+              + Create Module
+            </button>
+            <button
+              onClick={() => setShowAddMinitaskToProject(true)}
+              onMouseEnter={() => setHoveredButton('add-minitask-project')}
+              onMouseLeave={() => setHoveredButton(null)}
+              style={{
+                padding: '12px 24px',
+                background: hoveredButton === 'add-minitask-project' ? 'rgba(21, 27, 46, 0.8)' : 'rgba(21, 27, 46, 0.6)',
+                backdropFilter: 'blur(20px)',
+                border: hoveredButton === 'add-minitask-project' ? '1px solid rgba(0, 217, 255, 0.5)' : '1px solid rgba(0, 217, 255, 0.2)',
+                borderRadius: '8px',
+                color: '#00d9ff',
+                fontFamily: 'Orbitron, sans-serif',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                boxShadow: hoveredButton === 'add-minitask-project' ? '0 0 20px rgba(0, 217, 255, 0.3)' : 'none',
+              }}
+            >
+              + Add Minitask
+            </button>
+          </div>
         </div>
 
         {/* Modules Grid */}
@@ -421,16 +495,16 @@ export default function ProjectDetailPage() {
                               </div>
                               
                               <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>
-                                {task.subtasks?.length || 0} subtasks
+                                {task.minitasks?.length || 0} minitasks
                               </span>
                             </div>
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedTaskForSubtask({ id: task.id, name: task.name });
+                                setSelectedTaskForMinitask({ id: task.id, name: task.name });
                               }}
-                              onMouseEnter={() => setHoveredButton(`add-subtask-${task.id}`)}
+                              onMouseEnter={() => setHoveredButton(`add-minitask-task-${task.id}`)}
                               onMouseLeave={() => setHoveredButton(null)}
                               style={{
                                 width: '100%',
@@ -440,8 +514,8 @@ export default function ProjectDetailPage() {
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 gap: '6px',
-                                background: hoveredButton === `add-subtask-${task.id}` ? 'rgba(0,217,255,0.1)' : 'rgba(0,217,255,0.05)',
-                                border: hoveredButton === `add-subtask-${task.id}` ? '1px solid rgba(0,217,255,0.5)' : '1px dashed rgba(0,217,255,0.3)',
+                                background: hoveredButton === `add-minitask-task-${task.id}` ? 'rgba(0,217,255,0.1)' : 'rgba(0,217,255,0.05)',
+                                border: hoveredButton === `add-minitask-task-${task.id}` ? '1px solid rgba(0,217,255,0.5)' : '1px dashed rgba(0,217,255,0.3)',
                                 borderRadius: '6px',
                                 color: 'rgba(0,217,255,0.8)',
                                 fontSize: '12px',
@@ -450,7 +524,7 @@ export default function ProjectDetailPage() {
                               }}
                             >
                               <Plus size={14} />
-                              Add Subtask
+                              Add Minitask
                             </button>
                           </div>
                         );
@@ -467,26 +541,45 @@ export default function ProjectDetailPage() {
                     )}
                   </div>
 
-                  {/* Add Task Button */}
-                  <button 
-                    onClick={() => setSelectedModuleForTask(module.id)}
-                    onMouseEnter={() => setHoveredButton(`add-task-${module.id}`)}
-                    onMouseLeave={() => setHoveredButton(null)}
-                    style={{ 
-                      width: '100%', 
-                      marginTop: '12px', 
-                      padding: '10px', 
-                      background: hoveredButton === `add-task-${module.id}` ? 'rgba(0,217,255,0.1)' : 'rgba(0,217,255,0.05)', 
-                      border: hoveredButton === `add-task-${module.id}` ? '1px solid rgba(0,217,255,0.5)' : '1px dashed rgba(0,217,255,0.3)', 
-                      borderRadius: '8px', 
-                      color: 'rgba(0,217,255,0.7)',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                      transition: 'all 0.2s ease'
-                    }}
-                  >
-                    + Add Task
-                  </button>
+                  {/* Add Task + Add Minitask Buttons */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+                    <button 
+                      onClick={() => setSelectedModuleForTask(module.id)}
+                      onMouseEnter={() => setHoveredButton(`add-task-${module.id}`)}
+                      onMouseLeave={() => setHoveredButton(null)}
+                      style={{ 
+                        width: '100%', 
+                        padding: '10px', 
+                        background: hoveredButton === `add-task-${module.id}` ? 'rgba(0,217,255,0.1)' : 'rgba(0,217,255,0.05)', 
+                        border: hoveredButton === `add-task-${module.id}` ? '1px solid rgba(0,217,255,0.5)' : '1px dashed rgba(0,217,255,0.3)', 
+                        borderRadius: '8px', 
+                        color: 'rgba(0,217,255,0.7)',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      + Add Task
+                    </button>
+                    <button 
+                      onClick={() => setSelectedModuleForMinitask({ id: module.id, name: module.name })}
+                      onMouseEnter={() => setHoveredButton(`add-minitask-module-${module.id}`)}
+                      onMouseLeave={() => setHoveredButton(null)}
+                      style={{ 
+                        width: '100%', 
+                        padding: '10px', 
+                        background: hoveredButton === `add-minitask-module-${module.id}` ? 'rgba(0,217,255,0.1)' : 'rgba(0,217,255,0.05)', 
+                        border: hoveredButton === `add-minitask-module-${module.id}` ? '1px solid rgba(0,217,255,0.5)' : '1px dashed rgba(0,217,255,0.3)', 
+                        borderRadius: '8px', 
+                        color: 'rgba(0,217,255,0.7)',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      + Add Minitask
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -533,16 +626,37 @@ export default function ProjectDetailPage() {
         <CreateTaskDialog
           open={!!selectedModuleForTask}
           onClose={() => setSelectedModuleForTask(null)}
+          projectId={projectId}
           moduleId={selectedModuleForTask}
         />
       )}
 
-      {selectedTaskForSubtask && (
-        <CreateSubtaskDialog
-          open={!!selectedTaskForSubtask}
-          onClose={() => setSelectedTaskForSubtask(null)}
-          parentTaskId={selectedTaskForSubtask.id}
-          parentTaskName={selectedTaskForSubtask.name}
+      {selectedTaskForMinitask && (
+        <CreateMinitaskDialog
+          open={!!selectedTaskForMinitask}
+          onClose={() => setSelectedTaskForMinitask(null)}
+          projectId={projectId}
+          taskId={selectedTaskForMinitask.id}
+          onSuccess={() => setSelectedTaskForMinitask(null)}
+        />
+      )}
+
+      {selectedModuleForMinitask && (
+        <CreateMinitaskDialog
+          open={!!selectedModuleForMinitask}
+          onClose={() => setSelectedModuleForMinitask(null)}
+          projectId={projectId}
+          moduleId={selectedModuleForMinitask.id}
+          onSuccess={() => setSelectedModuleForMinitask(null)}
+        />
+      )}
+
+      {showAddMinitaskToProject && (
+        <CreateMinitaskDialog
+          open={showAddMinitaskToProject}
+          onClose={() => setShowAddMinitaskToProject(false)}
+          projectId={projectId}
+          onSuccess={() => setShowAddMinitaskToProject(false)}
         />
       )}
 
@@ -565,6 +679,8 @@ export default function ProjectDetailPage() {
           title="Module team"
         />
       )}
+
+      {ConfirmDialogEl}
 
       <style jsx>{`
         @keyframes spin {

@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/use-auth';
 import { useChannelGroups, useTotalUnreadCount, useTeamUsersGrouped, useTasksHierarchy } from '@/lib/chat/queries';
-import { useCreateOrGetDM, useGetOrCreateTaskChannel } from '@/lib/chat/mutations';
-import { X, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { useCreateOrGetDM, useGetOrCreateTaskChannel, useGetOrCreateMinitaskChannel, useGetOrCreateSubtaskChannel } from '@/lib/chat/mutations';
+import { X, ChevronDown, ChevronRight, Search, MessageCircle } from 'lucide-react';
 import { MiniConversationIcons, type OpenChat } from './MiniConversationIcons';
 import { MiniChatWindow } from './MiniChatWindow';
 import { CreateGroupDialog } from './CreateGroupDialog';
@@ -33,8 +33,10 @@ export function CommsBeacon() {
     workers: false,
     clients: false,
     task_projects: false,
+    task_modules: false,
     task_tasks: false,
-    task_subtasks: false,
+    task_minitasks: false,
+    task_satellites: false,
   });
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,6 +44,8 @@ export function CommsBeacon() {
   const { data: channelData } = useChannelGroups(user?.id);
   const { data: tasksHierarchy, isLoading: hierarchyLoading } = useTasksHierarchy(user?.id);
   const getOrCreateTaskChannel = useGetOrCreateTaskChannel();
+  const getOrCreateMinitaskChannel = useGetOrCreateMinitaskChannel();
+  const getOrCreateSubtaskChannel = useGetOrCreateSubtaskChannel();
   const { data: teamUsersGrouped, isLoading: crewLoading } = useTeamUsersGrouped(user?.id, user?.role);
   const { chat, groups } = channelData || { chat: [], groups: [], tasks: [] };
   const createDM = useCreateOrGetDM();
@@ -67,6 +71,18 @@ export function CommsBeacon() {
     },
     [openChats]
   );
+
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ channelId: string }>) => {
+      const channelId = e.detail?.channelId;
+      if (!channelId) return;
+      const ch = (channelData?.all || []).find((c) => c.id === channelId);
+      const toOpen = ch || { id: channelId, type: 'channel' as const };
+      openConversation(toOpen);
+    };
+    window.addEventListener('open-comms-channel', handler as EventListener);
+    return () => window.removeEventListener('open-comms-channel', handler as EventListener);
+  }, [channelData?.all, openConversation]);
 
   const toggleMiniChat = useCallback((chatId: string) => {
     setOpenChats((prev) => {
@@ -158,6 +174,60 @@ export function CommsBeacon() {
       );
     },
     [channelData?.all, getOrCreateTaskChannel, openConversation]
+  );
+
+  const openMinitaskChannel = useCallback(
+    (minitaskId: string, minitaskName: string, projectName: string, moduleName: string) => {
+      getOrCreateMinitaskChannel.mutate(
+        { minitaskId },
+        {
+          onSuccess: (data) => {
+            const existingCh = (channelData?.all || []).find((c) => c.id === data.id);
+            const ch =
+              existingCh ||
+              ({
+                id: data.id,
+                name: minitaskName,
+                type: 'channel' as const,
+                project: { id: '', name: projectName },
+                module: { id: '', name: moduleName },
+              } as any);
+            openConversation(ch);
+          },
+          onError: (err) => {
+            toast.error('Nie można otworzyć czatu', { description: err.message });
+          },
+        }
+      );
+    },
+    [channelData?.all, getOrCreateMinitaskChannel, openConversation]
+  );
+
+  const openSubtaskChannel = useCallback(
+    (subtaskId: string, subtaskName: string, projectName: string, moduleName: string) => {
+      getOrCreateSubtaskChannel.mutate(
+        { subtaskId },
+        {
+          onSuccess: (data) => {
+            const existingCh = (channelData?.all || []).find((c) => c.id === data.id);
+            const ch =
+              existingCh ||
+              ({
+                id: data.id,
+                name: subtaskName,
+                type: 'channel' as const,
+                project: { id: '', name: projectName },
+                module: { id: '', name: moduleName },
+              } as any);
+            openConversation(ch);
+          },
+          onError: (err) => {
+            toast.error('Nie można otworzyć czatu', { description: err.message });
+          },
+        }
+      );
+    },
+    [channelData?.all, getOrCreateSubtaskChannel, openConversation]
   );
 
   const handleStartDM = (otherUser: any) => {
@@ -277,18 +347,10 @@ export function CommsBeacon() {
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 9998,
+          color: COMMS_STYLES.accent,
         }}
       >
-        <div
-          className="animate-comms-pulse"
-          style={{
-            width: 10,
-            height: 10,
-            borderRadius: '50%',
-            background: COMMS_STYLES.accent,
-            boxShadow: `0 0 10px ${COMMS_STYLES.accent}88`,
-          }}
-        />
+        <MessageCircle size={24} />
         {totalUnread !== undefined && totalUnread > 0 && (
           <span
             style={{
@@ -642,14 +704,113 @@ export function CommsBeacon() {
                       .map((t) => ({ ...t, moduleName: m.name, projectName: p.name }))
                   )
                 );
+                const flatMinitasks = tasksHierarchy.flatMap((p) =>
+                  p.modules.flatMap((m) =>
+                    m.tasks.flatMap((t) =>
+                      (t.minitasks || [])
+                        .filter((mt) => !q || mt.name.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || m.name.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
+                        .map((mt) => ({ ...mt, taskId: t.id, taskName: t.name, moduleName: m.name, projectName: p.name }))
+                    )
+                  )
+                );
+                const flatSatellites = tasksHierarchy.flatMap((p) =>
+                  p.modules.flatMap((m) =>
+                    m.tasks.flatMap((t) =>
+                      (t.subtasks || [])
+                        .filter((st) => !q || st.name.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || m.name.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
+                        .map((st) => ({ ...st, taskId: t.id, taskName: t.name, moduleName: m.name, projectName: p.name }))
+                    )
+                  )
+                );
 
-                const taskGroups = [
-                  { key: 'task_projects', label: 'PROJECTS', items: flatProjects, empty: 'Brak projektów' },
-                  { key: 'task_tasks', label: 'TASKS', items: flatModules, empty: 'Brak tasków' },
-                  { key: 'task_subtasks', label: 'SUBTASKS', items: flatTasks, empty: 'Brak subtasków' },
+                const taskGroups: { key: string; label: string; items: unknown[]; empty: string; renderItem: (item: any) => React.ReactNode }[] = [
+                  {
+                    key: 'task_projects',
+                    label: 'PROJECTS',
+                    items: flatProjects,
+                    empty: 'Brak projektów',
+                    renderItem: (project) => (
+                      <button
+                        key={project.id}
+                        onClick={() => project.channel_id && openProjectChannel(project.channel_id, project.name)}
+                        disabled={!project.channel_id}
+                        style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '8px 12px', borderRadius: 6, background: 'transparent', border: '1px solid transparent', color: COMMS_STYLES.text, cursor: project.channel_id ? 'pointer' : 'default', textAlign: 'left', fontSize: 12 }}
+                      >
+                        {project.name}
+                      </button>
+                    ),
+                  },
+                  {
+                    key: 'task_modules',
+                    label: 'MODULES',
+                    items: flatModules,
+                    empty: 'Brak modułów',
+                    renderItem: (module) => (
+                      <button
+                        key={module.id}
+                        onClick={() => module.channel_id && openModuleChannel(module.channel_id, module.name, module.projectName)}
+                        disabled={!module.channel_id}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%', padding: '8px 12px', borderRadius: 6, background: 'transparent', border: '1px solid transparent', color: COMMS_STYLES.text, cursor: module.channel_id ? 'pointer' : 'default', textAlign: 'left', fontSize: 12 }}
+                      >
+                        <span style={{ fontWeight: 600 }}>{module.name}</span>
+                        <span style={{ fontSize: 10, color: COMMS_STYLES.muted }}>{module.projectName}</span>
+                      </button>
+                    ),
+                  },
+                  {
+                    key: 'task_tasks',
+                    label: 'TASKS',
+                    items: flatTasks,
+                    empty: 'Brak tasków',
+                    renderItem: (task) => (
+                      <button
+                        key={task.id}
+                        onClick={() => openTaskChannel(task.id, task.name, task.projectName, task.moduleName)}
+                        disabled={getOrCreateTaskChannel.isPending}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%', padding: '8px 12px', borderRadius: 6, background: 'transparent', border: '1px solid transparent', color: COMMS_STYLES.text, cursor: getOrCreateTaskChannel.isPending ? 'wait' : 'pointer', textAlign: 'left', fontSize: 12 }}
+                      >
+                        <span style={{ fontWeight: 500 }}>{task.name}</span>
+                        <span style={{ fontSize: 10, color: COMMS_STYLES.muted }}>{task.moduleName}</span>
+                      </button>
+                    ),
+                  },
+                  {
+                    key: 'task_minitasks',
+                    label: 'MINI TASKS',
+                    items: flatMinitasks,
+                    empty: 'Brak mini tasków',
+                    renderItem: (mt) => (
+                      <button
+                        key={mt.id}
+                        onClick={() => openMinitaskChannel(mt.id, mt.name, mt.projectName, mt.moduleName)}
+                        disabled={getOrCreateMinitaskChannel.isPending}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%', padding: '8px 12px', borderRadius: 6, background: 'transparent', border: '1px solid transparent', color: COMMS_STYLES.text, cursor: getOrCreateMinitaskChannel.isPending ? 'wait' : 'pointer', textAlign: 'left', fontSize: 12 }}
+                      >
+                        <span style={{ fontWeight: 500 }}>{mt.name}</span>
+                        <span style={{ fontSize: 10, color: COMMS_STYLES.muted }}>{mt.taskName} · {mt.moduleName}</span>
+                      </button>
+                    ),
+                  },
+                  {
+                    key: 'task_satellites',
+                    label: 'SATELLITES',
+                    items: flatSatellites,
+                    empty: 'Brak satelitów',
+                    renderItem: (st) => (
+                      <button
+                        key={st.id}
+                        onClick={() => openSubtaskChannel(st.id, st.name, st.projectName, st.moduleName)}
+                        disabled={getOrCreateSubtaskChannel.isPending}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%', padding: '8px 12px', borderRadius: 6, background: 'transparent', border: '1px solid transparent', color: COMMS_STYLES.text, cursor: getOrCreateSubtaskChannel.isPending ? 'wait' : 'pointer', textAlign: 'left', fontSize: 12 }}
+                      >
+                        <span style={{ fontWeight: 500 }}>{st.name}</span>
+                        <span style={{ fontSize: 10, color: COMMS_STYLES.muted }}>{st.taskName} · {st.moduleName}</span>
+                      </button>
+                    ),
+                  },
                 ];
 
-                return taskGroups.map(({ key, label, items, empty }) => (
+                return taskGroups.map(({ key, label, items, empty, renderItem }) => (
                   <div key={key} style={{ marginBottom: 8 }}>
                     <button
                       onClick={() => toggleGroup(key)}
@@ -679,79 +840,8 @@ export function CommsBeacon() {
                       <div style={{ marginTop: 4, paddingLeft: 8, borderLeft: `1px solid ${COMMS_STYLES.accentRgba(0.08)}` }}>
                         {items.length === 0 ? (
                           <p style={{ color: COMMS_STYLES.muted, fontSize: 11, padding: '8px 12px' }}>{empty}</p>
-                        ) : key === 'task_projects' ? (
-                          flatProjects.map((project) => (
-                            <button
-                              key={project.id}
-                              onClick={() => project.channel_id && openProjectChannel(project.channel_id, project.name)}
-                              disabled={!project.channel_id}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                width: '100%',
-                                padding: '8px 12px',
-                                borderRadius: 6,
-                                background: 'transparent',
-                                border: '1px solid transparent',
-                                color: COMMS_STYLES.text,
-                                cursor: project.channel_id ? 'pointer' : 'default',
-                                textAlign: 'left',
-                                fontSize: 12,
-                              }}
-                            >
-                              {project.name}
-                            </button>
-                          ))
-                        ) : key === 'task_tasks' ? (
-                          flatModules.map((module) => (
-                            <button
-                              key={module.id}
-                              onClick={() => module.channel_id && openModuleChannel(module.channel_id, module.name, module.projectName)}
-                              disabled={!module.channel_id}
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'flex-start',
-                                width: '100%',
-                                padding: '8px 12px',
-                                borderRadius: 6,
-                                background: 'transparent',
-                                border: '1px solid transparent',
-                                color: COMMS_STYLES.text,
-                                cursor: module.channel_id ? 'pointer' : 'default',
-                                textAlign: 'left',
-                                fontSize: 12,
-                              }}
-                            >
-                              <span style={{ fontWeight: 600 }}>{module.name}</span>
-                              <span style={{ fontSize: 10, color: COMMS_STYLES.muted }}>{module.projectName}</span>
-                            </button>
-                          ))
                         ) : (
-                          flatTasks.map((task) => (
-                            <button
-                              key={task.id}
-                              onClick={() => openTaskChannel(task.id, task.name, task.projectName, task.moduleName)}
-                              disabled={getOrCreateTaskChannel.isPending}
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'flex-start',
-                                width: '100%',
-                                padding: '8px 12px',
-                                borderRadius: 6,
-                                background: 'transparent',
-                                border: '1px solid transparent',
-                                color: COMMS_STYLES.text,
-                                cursor: getOrCreateTaskChannel.isPending ? 'wait' : 'pointer',
-                                textAlign: 'left',
-                                fontSize: 12,
-                              }}
-                            >
-                              <span style={{ fontWeight: 500 }}>{task.name}</span>
-                              <span style={{ fontSize: 10, color: COMMS_STYLES.muted }}>{task.moduleName}</span>
-                            </button>
-                          ))
+                          items.map((item) => renderItem(item))
                         )}
                       </div>
                     )}

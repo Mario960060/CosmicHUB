@@ -63,16 +63,114 @@ function TaskRefCard({ task }: { task: { id: string; name: string; status: strin
   );
 }
 
+function getMentionState(text: string, cursorPos: number): { query: string; start: number } | null {
+  const beforeCursor = text.slice(0, cursorPos);
+  const atMatch = beforeCursor.match(/@([^\s@]*)$/);
+  if (!atMatch) return null;
+  return { query: atMatch[1].toLowerCase(), start: cursorPos - atMatch[0].length };
+}
+
+/** Znajduje najdłuższy dopasowany prefix dla @mention. Segment = tekst po @. */
+function findMentionMatch(segment: string, mentionableNames: string[]): { matched: string; len: number } | null {
+  const sorted = [...mentionableNames].sort((a, b) => b.length - a.length);
+  for (const name of sorted) {
+    const segLower = segment.toLowerCase();
+    const nameLower = name.toLowerCase();
+    if (segLower.startsWith(nameLower)) {
+      const afterName = segment[nameLower.length];
+      const len = nameLower.length + (afterName === ' ' ? 1 : 0);
+      return { matched: name, len: Math.min(len, segment.length) };
+    }
+    if (nameLower.startsWith(segLower)) {
+      return { matched: name, len: segment.length };
+    }
+  }
+  return null;
+}
+
+/** Renders text with @mentions highlighted in cyan. Mentions stay highlighted even when more text follows. */
+function renderTextWithMentions(text: string, mentionableNames: string[], baseColor: string = COMMS_STYLES.text) {
+  if (!text) return null;
+  const parts: { text: string; isMention: boolean }[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const atIdx = text.indexOf('@', i);
+    if (atIdx === -1) {
+      parts.push({ text: text.slice(i), isMention: false });
+      break;
+    }
+    if (atIdx > i) {
+      parts.push({ text: text.slice(i, atIdx), isMention: false });
+    }
+    const segment = text.slice(atIdx + 1);
+    const match = findMentionMatch(segment, mentionableNames);
+    if (match) {
+      const mentionText = '@' + segment.slice(0, match.len);
+      parts.push({ text: mentionText, isMention: true });
+      i = atIdx + 1 + match.len;
+    } else {
+      const nextAt = segment.indexOf('@');
+      const chunkEnd = nextAt === -1 ? text.length : atIdx + 1 + nextAt;
+      parts.push({ text: text.slice(atIdx, chunkEnd), isMention: false });
+      i = chunkEnd;
+    }
+  }
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.isMention ? (
+          <span key={i} style={{ color: COMMS_STYLES.accent, fontWeight: 500 }}>
+            {p.text}
+          </span>
+        ) : (
+          <span key={i} style={{ color: baseColor }}>{p.text}</span>
+        )
+      )}
+    </>
+  );
+}
+
 export function MiniChatWindow({ channel, isActive, onMinimize, onClose, onLeave }: MiniChatWindowProps) {
   const { user } = useAuth();
   const [inputValue, setInputValue] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [mentionHighlight, setMentionHighlight] = useState(-1);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const cursorPosRef = useRef(0);
   const { data: messages } = useChannelMessages(channel?.id, !!channel && isActive);
   const sendMessage = useSendMessage();
   const markRead = useMarkChannelRead();
+  const { data: teamUsers } = useTeamUsers(user?.id, user?.role);
+  const { data: groupMembers } = useGroupMembers(channel?.type === 'group' ? channel?.id : null, !!channel);
 
   useChatRealtime(user?.id, isActive ? channel?.id : null);
+
+  const mentionState = getMentionState(inputValue, cursorPosRef.current);
+  const mentionablePeople = (() => {
+    const people: { id: string; name: string; type: 'user' }[] = [];
+    const seen = new Set<string>();
+    (groupMembers || [])
+      .filter((m: any) => m.user && m.user.id !== user?.id)
+      .forEach((m: any) => {
+        const u = m.user;
+        if (u && !seen.has(u.id)) {
+          seen.add(u.id);
+          people.push({ id: u.id, name: u.full_name || 'Unknown', type: 'user' });
+        }
+      });
+    (teamUsers || []).forEach((u) => {
+      if (u.id !== user?.id && !seen.has(u.id)) {
+        seen.add(u.id);
+        people.push({ id: u.id, name: u.full_name || 'Unknown', type: 'user' });
+      }
+    });
+    return people;
+  })();
+  const filteredMentions = mentionState
+    ? mentionablePeople.filter((p) => p.name.toLowerCase().includes(mentionState.query)).slice(0, 8)
+    : [];
+  const showMentionDropdown = mentionState && (filteredMentions.length > 0 || mentionState.query === '');
 
   useEffect(() => {
     if (isActive && messages?.length) {
@@ -89,16 +187,23 @@ export function MiniChatWindow({ channel, isActive, onMinimize, onClose, onLeave
     }
   }, [isActive, channel?.id, user?.id]);
 
+  useEffect(() => {
+    if (showMentionDropdown) setMentionHighlight(0);
+    else setMentionHighlight(-1);
+  }, [showMentionDropdown]);
+
   const handleSend = () => {
     const content = inputValue.trim();
     if (!content || !channel || !user?.id || channel.type === 'tasks') return;
     setInputValue('');
+    setMentionHighlight(-1);
     sendMessage.mutate(
       {
         channelId: channel.id,
         content,
         userId: user.id,
         userFullName: user.full_name,
+        mentionablePeople,
       },
       {
         onError: (err) => {
@@ -108,7 +213,44 @@ export function MiniChatWindow({ channel, isActive, onMinimize, onClose, onLeave
     );
   };
 
+  const insertMention = (name: string) => {
+    if (!mentionState || !inputRef.current) return;
+    const before = inputValue.slice(0, mentionState.start);
+    const after = inputValue.slice(cursorPosRef.current);
+    const replacement = `@${name} `;
+    setInputValue(before + replacement + after);
+    setMentionHighlight(-1);
+    setTimeout(() => {
+      inputRef.current?.focus();
+      const newPos = mentionState.start + replacement.length;
+      inputRef.current?.setSelectionRange(newPos, newPos);
+      cursorPosRef.current = newPos;
+    }, 0);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showMentionDropdown && filteredMentions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionHighlight((h) => (h < filteredMentions.length - 1 ? h + 1 : 0));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionHighlight((h) => (h <= 0 ? filteredMentions.length - 1 : h - 1));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const selected = filteredMentions[mentionHighlight >= 0 ? mentionHighlight : 0];
+        if (selected) insertMention(selected.name);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setMentionHighlight(-1);
+        return;
+      }
+    }
     if ((e.key === 'Enter' && (e.ctrlKey || e.metaKey)) || (e.key === 'Enter' && !e.shiftKey)) {
       e.preventDefault();
       handleSend();
@@ -124,8 +266,6 @@ export function MiniChatWindow({ channel, isActive, onMinimize, onClose, onLeave
   const otherUser = channel.other_user;
   const online = isDM && otherUser?.last_seen ? isUserOnline(otherUser.last_seen) : false;
 
-  const { data: groupMembers } = useGroupMembers(isGroup && showSettings ? channel.id : null);
-  const { data: teamUsers } = useTeamUsers(user?.id, user?.role);
   const addMember = useAddGroupMember();
   const leaveGroup = useLeaveGroup();
   const promoteMember = usePromoteGroupMember();
@@ -615,7 +755,9 @@ export function MiniChatWindow({ channel, isActive, onMinimize, onClose, onLeave
                               </span>
                             </div>
                           )}
-                          <p style={{ fontSize: 12, lineHeight: 1.55, color: COMMS_STYLES.text, margin: 0, textAlign: isOwn ? 'right' : 'left' }}>{msg.content}</p>
+                          <p style={{ fontSize: 12, lineHeight: 1.55, margin: 0, textAlign: isOwn ? 'right' : 'left' }}>
+                            {msg.content ? renderTextWithMentions(msg.content, mentionablePeople.map((p) => p.name), COMMS_STYLES.text) : null}
+                          </p>
                           {msg.task && <TaskRefCard task={msg.task} />}
                         </div>
                       </>
@@ -651,6 +793,7 @@ export function MiniChatWindow({ channel, isActive, onMinimize, onClose, onLeave
         <div
           style={{
             flexShrink: 0,
+            position: 'relative',
             display: 'flex',
             gap: 8,
             alignItems: 'flex-end',
@@ -658,26 +801,124 @@ export function MiniChatWindow({ channel, isActive, onMinimize, onClose, onLeave
             borderTop: `1px solid ${COMMS_STYLES.accentRgba(0.06)}`,
           }}
         >
-          <textarea
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Transmit message..."
-            style={{
-              flex: 1,
-              minHeight: 38,
-              maxHeight: 80,
-              padding: '9px 14px',
-              borderRadius: 10,
-              background: COMMS_STYLES.accentRgba(0.03),
-              border: `1px solid ${COMMS_STYLES.accentRgba(0.08)}`,
-              fontFamily: 'Exo 2',
-              fontSize: 12,
-              color: '#e2e8f0',
-              resize: 'none',
-              outline: 'none',
-            }}
-          />
+          <div style={{ position: 'relative', flex: 1 }}>
+            <div
+              aria-hidden
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                minHeight: 38,
+                maxHeight: 80,
+                padding: '9px 14px',
+                borderRadius: 10,
+                background: COMMS_STYLES.accentRgba(0.03),
+                border: `1px solid transparent`,
+                fontFamily: 'Exo 2',
+                fontSize: 12,
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                overflow: 'hidden',
+                pointerEvents: 'none',
+              }}
+            >
+              {renderTextWithMentions(inputValue || '', mentionablePeople.map((p) => p.name), '#e2e8f0')}
+            </div>
+            <textarea
+              ref={inputRef}
+              value={inputValue}
+              onChange={(e) => {
+                cursorPosRef.current = e.target.selectionStart ?? 0;
+                setInputValue(e.target.value);
+              }}
+              onSelect={(e) => {
+                cursorPosRef.current = (e.target as HTMLTextAreaElement).selectionStart ?? 0;
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder="Transmit message... (type @ to mention)"
+              style={{
+                position: 'relative',
+                zIndex: 1,
+                width: '100%',
+                minHeight: 38,
+                maxHeight: 80,
+                padding: '9px 14px',
+                borderRadius: 10,
+                background: 'transparent',
+                border: `1px solid ${COMMS_STYLES.accentRgba(0.08)}`,
+                fontFamily: 'Exo 2',
+                fontSize: 12,
+                color: 'transparent',
+                caretColor: COMMS_STYLES.accent,
+                resize: 'none',
+                outline: 'none',
+              }}
+              className="comms-mention-input"
+            />
+            {showMentionDropdown && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: 0,
+                  right: 0,
+                  marginBottom: 6,
+                  maxHeight: 180,
+                  overflowY: 'auto',
+                  background: 'rgba(8, 16, 32, 0.98)',
+                  border: `1px solid ${COMMS_STYLES.accentRgba(0.2)}`,
+                  borderRadius: 8,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                  zIndex: 100,
+                }}
+              >
+                <div style={{ padding: '6px 10px', fontSize: 10, color: COMMS_STYLES.muted, fontFamily: 'Orbitron' }}>
+                  Oznacz osobę @
+                </div>
+                {filteredMentions.map((p, i) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => insertMention(p.name)}
+                    onMouseEnter={() => setMentionHighlight(i)}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '8px 12px',
+                      background: mentionHighlight === i ? COMMS_STYLES.accentRgba(0.15) : 'transparent',
+                      border: 'none',
+                      color: COMMS_STYLES.text,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontSize: 12,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: '50%',
+                        background: COMMS_STYLES.accentRgba(0.2),
+                        color: COMMS_STYLES.accent,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 10,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {getInitials(p.name)}
+                    </span>
+                    <span>{p.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={handleSend}
             disabled={!inputValue.trim()}

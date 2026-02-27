@@ -10,9 +10,10 @@ import { BellOff, HelpCircle } from 'lucide-react';
 
 interface NotificationDropdownProps {
   onClose: () => void;
+  buttonRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
-export function NotificationDropdown({ onClose }: NotificationDropdownProps) {
+export function NotificationDropdown({ onClose, buttonRef }: NotificationDropdownProps) {
   const { user } = useAuth();
   const router = useRouter();
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -22,13 +23,15 @@ export function NotificationDropdown({ onClose }: NotificationDropdownProps) {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (buttonRef?.current?.contains(target)) return;
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
         onClose();
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose]);
+  }, [onClose, buttonRef]);
 
   const handleNotificationClick = async (notification: any) => {
     if (!notification.read) {
@@ -49,6 +52,9 @@ export function NotificationDropdown({ onClose }: NotificationDropdownProps) {
           break;
         case 'user':
           router.push('/admin/users');
+          break;
+        case 'channel':
+          window.dispatchEvent(new CustomEvent('open-comms-channel', { detail: { channelId: notification.related_id } }));
           break;
       }
     }

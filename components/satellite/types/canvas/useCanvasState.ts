@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { PortSide } from './canvas-utils';
+import { getCanvasClipboard, setCanvasClipboard, hasCanvasClipboardContent, subscribeToClipboardChange } from './canvas-clipboard';
 import type {
   CanvasShapeData,
   ShapeStroke,
@@ -72,7 +73,7 @@ export interface CanvasState {
   shapes: CanvasShape[];
 }
 
-const MAX_UNDO = 50;
+const MAX_UNDO = 200;
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -155,26 +156,17 @@ export function useCanvasState(initial: Partial<CanvasState>) {
     shapes: (initial.shapes ?? []).map(normalizeShape),
   }));
 
+  const [clipboardVersion, setClipboardVersion] = useState(0);
+  useEffect(() => {
+    return subscribeToClipboardChange(() => setClipboardVersion((v) => v + 1));
+  }, []);
+
   const [undoStack, setUndoStack] = useState<CanvasState[]>([]);
   const [redoStack, setRedoStack] = useState<CanvasState[]>([]);
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(new Set());
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(new Set());
   const [selectedShapeIds, setSelectedShapeIds] = useState<Set<string>>(new Set());
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
-  const [copiedBlocks, setCopiedBlocks] = useState<CanvasBlock[]>([]);
-
-function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
-  const shape = s as CanvasShape & { stroke?: Partial<ShapeStroke>; fill?: Partial<ShapeFill> };
-  return {
-    ...shape,
-    stroke: { ...DEFAULT_STROKE, ...shape.stroke },
-    fill: shape.fill ? { color: shape.fill.color ?? 'none', opacity: shape.fill.opacity ?? 0.25 } : undefined,
-    rotation: shape.rotation ?? 0,
-    cornerRadius: shape.cornerRadius ?? 0,
-    arrowStart: shape.arrowStart ?? false,
-    arrowEnd: shape.arrowEnd ?? (shape.type === 'arrow'),
-  };
-}
 
   const pushUndo = useCallback(() => {
     setUndoStack((prev) => [...prev.slice(-MAX_UNDO + 1), createStateSnapshot(state)]);
@@ -398,14 +390,22 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
       }
       return new Set([id]);
     });
-    setSelectedConnectionIds(new Set());
-    setSelectedShapeIds(new Set());
+    if (!addToSelection) {
+      setSelectedConnectionIds(new Set());
+      setSelectedShapeIds(new Set());
+    }
   }, []);
 
   const selectBlocks = useCallback((ids: Set<string>) => {
     setSelectedBlockIds(ids);
     setSelectedConnectionIds(new Set());
     setSelectedShapeIds(new Set());
+  }, []);
+
+  const selectBlocksAndShapes = useCallback((blockIds: Set<string>, shapeIds: Set<string>) => {
+    setSelectedBlockIds(blockIds);
+    setSelectedShapeIds(shapeIds);
+    setSelectedConnectionIds(new Set());
   }, []);
 
   const selectShape = useCallback((id: string | null, addToSelection?: boolean) => {
@@ -418,8 +418,10 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
       }
       return new Set([id]);
     });
-    setSelectedBlockIds(new Set());
-    setSelectedConnectionIds(new Set());
+    if (!addToSelection) {
+      setSelectedBlockIds(new Set());
+      setSelectedConnectionIds(new Set());
+    }
   }, []);
 
   const selectShapes = useCallback((ids: Set<string>) => {
@@ -428,9 +430,17 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
     setSelectedConnectionIds(new Set());
   }, []);
 
-  const selectConnection = useCallback((id: string | null) => {
-    setSelectedConnectionIds(id ? new Set([id]) : new Set());
-    if (id) {
+  const selectConnection = useCallback((id: string | null, addToSelection?: boolean) => {
+    setSelectedConnectionIds((prev) => {
+      if (!id) return new Set();
+      if (addToSelection) {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      }
+      return new Set([id]);
+    });
+    if (id && !addToSelection) {
       setSelectedBlockIds(new Set());
       setSelectedShapeIds(new Set());
     }
@@ -483,6 +493,33 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
         const next = new Set(prev);
         state.connections.forEach((c) => {
           if (connectionReferencesEntity(c, id)) next.delete(c.id);
+        });
+        return next;
+      });
+    },
+    [pushUndo, state.connections]
+  );
+
+  const deleteShapes = useCallback(
+    (ids: Set<string>, skipUndo?: boolean) => {
+      if (ids.size === 0) return;
+      if (!skipUndo) pushUndo();
+      setState((s) => ({
+        ...s,
+        shapes: s.shapes.filter((sh) => !ids.has(sh.id)),
+        connections: s.connections.filter(
+          (c) => !ids.has(c.from.entityId) && !ids.has(c.to.entityId)
+        ),
+      }));
+      setSelectedShapeIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      setSelectedConnectionIds((prev) => {
+        const next = new Set(prev);
+        state.connections.forEach((c) => {
+          if (ids.has(c.from.entityId) || ids.has(c.to.entityId)) next.delete(c.id);
         });
         return next;
       });
@@ -658,36 +695,80 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
   }, [selectedBlockIds, selectedShapeIds, state.blocks, state.shapes, state.connections, pushUndo]);
 
   const copy = useCallback(() => {
-    const ids = selectedBlockIds;
-    if (ids.size === 0) return;
-    const blocks = state.blocks.filter((b) => ids.has(b.id));
-    setCopiedBlocks(blocks.map((b) => ({ ...b })));
-  }, [selectedBlockIds, state.blocks]);
+    const blockIds = selectedBlockIds;
+    const shapeIds = selectedShapeIds;
+    if (blockIds.size === 0 && shapeIds.size === 0) return;
+    const blocks = state.blocks.filter((b) => blockIds.has(b.id)).map((b) => ({ ...b }));
+    const shapes = state.shapes.filter((s) => shapeIds.has(s.id)).map((s) => ({
+      ...s,
+      stroke: { ...s.stroke },
+      fill: s.fill ? { ...s.fill } : undefined,
+    }));
+    setCanvasClipboard(blocks, shapes);
+  }, [selectedBlockIds, selectedShapeIds, state.blocks, state.shapes]);
 
   const paste = useCallback(
     (x: number, y: number) => {
-      if (copiedBlocks.length === 0) return;
+      const { blocks: cb, shapes: cs } = getCanvasClipboard();
+      if (cb.length === 0 && cs.length === 0) return;
       pushUndo();
-      const minX = Math.min(...copiedBlocks.map((b) => b.x));
-      const minY = Math.min(...copiedBlocks.map((b) => b.y));
-      const idMap = new Map<string, string>();
-      const newBlocks: CanvasBlock[] = copiedBlocks.map((b) => {
+      const blockIdMap = new Map<string, string>();
+      const shapeIdMap = new Map<string, string>();
+      let minX = Infinity;
+      let minY = Infinity;
+      cb.forEach((b) => {
+        minX = Math.min(minX, b.x);
+        minY = Math.min(minY, b.y);
+      });
+      cs.forEach((s) => {
+        const bbox = s.type === 'line' || s.type === 'arrow'
+          ? { x: Math.min(s.x1 ?? 0, s.x2 ?? 0), y: Math.min(s.y1 ?? 0, s.y2 ?? 0) }
+          : s.type === 'freehand' && s.points?.length
+            ? s.points.reduce((acc, [px, py]) => ({ x: Math.min(acc.x, px), y: Math.min(acc.y, py) }), { x: Infinity, y: Infinity })
+            : { x: s.x ?? 0, y: s.y ?? 0 };
+        if (Number.isFinite(bbox.x)) minX = Math.min(minX, bbox.x);
+        if (Number.isFinite(bbox.y)) minY = Math.min(minY, bbox.y);
+      });
+      if (!Number.isFinite(minX)) minX = 0;
+      if (!Number.isFinite(minY)) minY = 0;
+      const newBlocks: CanvasBlock[] = cb.map((b) => {
         const newId = generateId();
-        idMap.set(b.id, newId);
-        return {
-          ...b,
-          id: newId,
-          x: x + (b.x - minX),
-          y: y + (b.y - minY),
-        };
+        blockIdMap.set(b.id, newId);
+        return { ...b, id: newId, x: x + (b.x - minX), y: y + (b.y - minY) };
+      });
+      const newShapes: CanvasShape[] = cs.map((s) => {
+        const newId = generateId();
+        shapeIdMap.set(s.id, newId);
+        const dup = { ...s, id: newId };
+        const dx = x - minX;
+        const dy = y - minY;
+        if (dup.type === 'line' || dup.type === 'arrow') {
+          dup.x1 = (dup.x1 ?? 0) + dx;
+          dup.y1 = (dup.y1 ?? 0) + dy;
+          dup.x2 = (dup.x2 ?? 0) + dx;
+          dup.y2 = (dup.y2 ?? 0) + dy;
+        } else if (dup.type === 'freehand' && dup.points) {
+          dup.points = dup.points.map(([px, py]) => [px + dx, py + dy] as [number, number]);
+        } else {
+          dup.x = (dup.x ?? 0) + dx;
+          dup.y = (dup.y ?? 0) + dy;
+        }
+        return dup;
       });
       setState((s) => ({
         ...s,
         blocks: [...s.blocks, ...newBlocks],
+        shapes: [...s.shapes, ...newShapes],
       }));
-      setSelectedBlockIds(new Set(newBlocks.map((b) => b.id)));
+      if (newBlocks.length > 0) {
+        setSelectedBlockIds(new Set(newBlocks.map((b) => b.id)));
+        setSelectedShapeIds(new Set());
+      } else if (newShapes.length > 0) {
+        setSelectedShapeIds(new Set(newShapes.map((s) => s.id)));
+        setSelectedBlockIds(new Set());
+      }
     },
-    [copiedBlocks, pushUndo]
+    [pushUndo]
   );
 
   const deleteSelected = useCallback(() => {
@@ -745,6 +826,7 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
     moveBlocks,
     addShape,
     deleteShape,
+    deleteShapes,
     updateShape,
     moveShape,
     moveShapes,
@@ -765,6 +847,7 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
     setGridEnabled,
     selectBlock,
     selectBlocks,
+    selectBlocksAndShapes,
     selectShape,
     selectShapes,
     selectConnection,
@@ -778,6 +861,6 @@ function normalizeShape(s: CanvasShape | Record<string, unknown>): CanvasShape {
     redo,
     canUndo: undoStack.length > 0,
     canRedo: redoStack.length > 0,
-    copiedBlocksCount: copiedBlocks.length,
+    copiedBlocksCount: hasCanvasClipboardContent() ? 1 : 0,
   };
 }

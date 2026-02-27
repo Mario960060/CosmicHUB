@@ -151,6 +151,7 @@ export function CanvasEditorPopup({
     startBounds: { x: number; y: number; width: number; height: number } | { x1: number; y1: number; x2: number; y2: number };
   } | null>(null);
   const boxRef = useRef<{ startX: number; startY: number } | null>(null);
+  const eraserStrokeRef = useRef<{ hasPushedUndo: boolean; deletedIds: Set<string> } | null>(null);
   const pannedThisSessionRef = useRef(false);
   const snapGuideRef = useRef<{ vertical?: number; horizontal?: number }>({});
   const lastPointerRef = useRef<{ clientX: number; clientY: number }>({ clientX: 0, clientY: 0 });
@@ -280,6 +281,20 @@ export function CanvasEditorPopup({
       // Left-click on background
       if (e.button === 0) {
         e.preventDefault();
+
+        if (activeTool === 'eraser') {
+          eraserStrokeRef.current = { hasPushedUndo: false, deletedIds: new Set() };
+          const near = getShapeNearPoint(state.shapes, canvasCoords.x, canvasCoords.y, 24);
+          if (near) {
+            canvasState.pushUndo();
+            eraserStrokeRef.current.hasPushedUndo = true;
+            const ids = new Set([near.shape.id]);
+            canvasState.deleteShapes(ids, true);
+            eraserStrokeRef.current.deletedIds.add(near.shape.id);
+          }
+          return;
+        }
+
         const isDrawingTool =
           activeTool === 'line' ||
           activeTool === 'arrow' ||
@@ -302,7 +317,8 @@ export function CanvasEditorPopup({
         } else {
           const near = getShapeNearPoint(state.shapes, canvasCoords.x, canvasCoords.y, 20);
           if (near) {
-            canvasState.selectShape(near.shape.id, e.shiftKey);
+            const addToSel = e.ctrlKey || e.metaKey || e.shiftKey;
+            canvasState.selectShape(near.shape.id, addToSel);
             const ids = canvasState.selectedShapeIds.has(near.shape.id) ? canvasState.selectedShapeIds : new Set([near.shape.id]);
             shapeMoveRef.current = {
               shapeIds: ids,
@@ -330,8 +346,9 @@ export function CanvasEditorPopup({
       if (target === 'body') {
         const block = state.blocks.find((b) => b.id === blockId);
         if (!block) return;
+        const addToSel = e.ctrlKey || e.metaKey || e.shiftKey;
         if (!canvasState.selectedBlockIds.has(blockId)) {
-          canvasState.selectBlock(blockId, e.shiftKey);
+          canvasState.selectBlock(blockId, addToSel);
         }
         const ids = canvasState.selectedBlockIds.has(blockId) ? canvasState.selectedBlockIds : new Set([blockId]);
         moveRef.current = { blockIds: ids, startPositions: new Map(), lastClientX: e.clientX, lastClientY: e.clientY };
@@ -404,7 +421,8 @@ export function CanvasEditorPopup({
   const handleConnectionPointerDown = useCallback(
     (connId: string, whichEnd: 'from' | 'to', e: React.PointerEvent) => {
       e.stopPropagation();
-      canvasState.selectConnection(connId);
+      const addToSel = e.ctrlKey || e.metaKey || e.shiftKey;
+      canvasState.selectConnection(connId, addToSel);
       setConnectionEndDrag({ connId, whichEnd, clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId });
     },
     [canvasState]
@@ -417,6 +435,23 @@ export function CanvasEditorPopup({
 
       if (drawingTools.isDrawing) {
         drawingTools.handlePointerMove(e);
+        return;
+      }
+
+      // Eraser stroke: delete shapes under cursor as we drag
+      if (eraserStrokeRef.current && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const canvasCoords = screenToCanvas(e.clientX, e.clientY, rect, state.viewport);
+        const near = getShapeNearPoint(state.shapes, canvasCoords.x, canvasCoords.y, 24);
+        if (near && !eraserStrokeRef.current.deletedIds.has(near.shape.id)) {
+          if (!eraserStrokeRef.current.hasPushedUndo) {
+            canvasState.pushUndo();
+            eraserStrokeRef.current.hasPushedUndo = true;
+          }
+          const ids = new Set([near.shape.id]);
+          canvasState.deleteShapes(ids, true);
+          eraserStrokeRef.current.deletedIds.add(near.shape.id);
+        }
         return;
       }
 
@@ -677,6 +712,8 @@ export function CanvasEditorPopup({
   // Connection creation/repositioning is handled by the window listener below.
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      eraserStrokeRef.current = null;
+
       if (drawingTools.isDrawing) {
         drawingTools.handlePointerUp(e);
         return;
@@ -695,14 +732,22 @@ export function CanvasEditorPopup({
         const minY = Math.min(boxRef.current.startY, canvasCoords.y);
         const maxX = Math.max(boxRef.current.startX, canvasCoords.x);
         const maxY = Math.max(boxRef.current.startY, canvasCoords.y);
-        const ids = new Set(
+        const blockIds = new Set(
           state.blocks.filter((b) => {
             const blockRight = b.x + b.width;
             const blockBottom = b.y + b.height;
             return b.x < maxX && blockRight > minX && b.y < maxY && blockBottom > minY;
           }).map((b) => b.id)
         );
-        if (ids.size > 0) canvasState.selectBlocks(ids);
+        const shapeIds = new Set(
+          state.shapes.filter((s) => {
+            const bbox = getShapeBoundingBox(s);
+            const boxRight = bbox.x + bbox.width;
+            const boxBottom = bbox.y + bbox.height;
+            return bbox.x < maxX && boxRight > minX && bbox.y < maxY && boxBottom > minY;
+          }).map((s) => s.id)
+        );
+        if (blockIds.size > 0 || shapeIds.size > 0) canvasState.selectBlocksAndShapes(blockIds, shapeIds);
         boxRef.current = null;
         setBoxSelection(null);
       }
@@ -718,7 +763,7 @@ export function CanvasEditorPopup({
       snapGuideRef.current = {};
       setSnapGuides(null);
     },
-    [connectionDrag, connectionEndDrag, state.viewport, state.blocks, canvasState, drawingTools]
+    [connectionDrag, connectionEndDrag, state.viewport, state.blocks, state.shapes, canvasState, drawingTools]
   );
 
   // === WINDOW POINTER MOVE for connection drags, rotation, resize ===
@@ -748,6 +793,7 @@ export function CanvasEditorPopup({
       setConnectionDrag(null);
       setConnectionEndDrag(null);
       panRef.current = null;
+      eraserStrokeRef.current = null;
       setIsPanning(false);
       moveRef.current = null;
       shapeMoveRef.current = null;
@@ -867,14 +913,22 @@ export function CanvasEditorPopup({
         const minY = Math.min(boxRef.current.startY, coords.y);
         const maxX = Math.max(boxRef.current.startX, coords.x);
         const maxY = Math.max(boxRef.current.startY, coords.y);
-        const ids = new Set(
+        const blockIds = new Set(
           s.blocks.filter((b) => {
             const blockRight = b.x + b.width;
             const blockBottom = b.y + b.height;
             return b.x < maxX && blockRight > minX && b.y < maxY && blockBottom > minY;
           }).map((b) => b.id)
         );
-        if (ids.size > 0) canvasStateRef.current.selectBlocks(ids);
+        const shapeIds = new Set(
+          (s.shapes ?? []).filter((sh) => {
+            const bbox = getShapeBoundingBox(sh);
+            const boxRight = bbox.x + bbox.width;
+            const boxBottom = bbox.y + bbox.height;
+            return bbox.x < maxX && boxRight > minX && bbox.y < maxY && boxBottom > minY;
+          }).map((sh) => sh.id)
+        );
+        if (blockIds.size > 0 || shapeIds.size > 0) canvasStateRef.current.selectBlocksAndShapes(blockIds, shapeIds);
         boxRef.current = null;
         setBoxSelection(null);
       }
@@ -1186,7 +1240,10 @@ export function CanvasEditorPopup({
               onBlockDoubleClick={(id) => canvasState.setEditingBlockId(id)}
               onBlockTextChange={(id, text) => canvasState.updateBlockText(id, text)}
               onBlockResizeStart={handleBlockResizeStart}
-              onConnectionClick={(id) => canvasState.selectConnection(id)}
+              onConnectionClick={(id, e) => {
+                const addToSel = e?.ctrlKey || e?.metaKey || e?.shiftKey;
+                canvasState.selectConnection(id, addToSel);
+              }}
               onConnectionContextMenu={(id, e) => {
                 e.preventDefault();
                 canvasState.selectConnection(id);
@@ -1203,7 +1260,13 @@ export function CanvasEditorPopup({
               }}
               onShapePointerDown={(shapeId, e) => {
                 e.stopPropagation();
-                canvasState.selectShape(shapeId, e.shiftKey);
+                if (activeTool === 'eraser') {
+                  canvasState.pushUndo();
+                  canvasState.deleteShape(shapeId);
+                  return;
+                }
+                const addToSel = e.ctrlKey || e.metaKey || e.shiftKey;
+                canvasState.selectShape(shapeId, addToSel);
                 shapeMoveRef.current = {
                   shapeIds: canvasState.selectedShapeIds.has(shapeId) ? canvasState.selectedShapeIds : new Set([shapeId]),
                   startPositions: new Map(),
@@ -1327,8 +1390,18 @@ export function CanvasEditorPopup({
             onFontColorChange={(c) => { canvasState.updateBlockFontColor(contextMenu.blockId, c); setContextMenu(null); }}
             onFontSize={(s) => { canvasState.updateBlockFontSize(contextMenu.blockId, s); setContextMenu(null); }}
             onTextAlign={(a) => { canvasState.updateBlockTextAlign(contextMenu.blockId, a); setContextMenu(null); }}
+            onCopy={() => { canvasState.copy(); setContextMenu(null); }}
+            onPaste={() => {
+              if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                const canvasCoords = screenToCanvas(contextMenu.x, contextMenu.y, rect, state.viewport);
+                canvasState.paste(canvasCoords.x, canvasCoords.y);
+              }
+              setContextMenu(null);
+            }}
             onDuplicate={() => { canvasState.duplicate(); setContextMenu(null); }}
             onDelete={() => { setPendingDelete({ type: 'block', blockId: contextMenu.blockId }); setContextMenu(null); }}
+            canPaste={canvasState.copiedBlocksCount > 0}
             onClose={() => setContextMenu(null)}
           />,
           document.body
@@ -1349,10 +1422,20 @@ export function CanvasEditorPopup({
             onCornerRadius={shape.type === 'rectangle' ? (r) => { canvasState.updateShape(contextMenu.shapeId, { cornerRadius: r }); setContextMenu(null); } : undefined}
             onArrowStart={(shape.type === 'line' || shape.type === 'arrow') ? (v) => { canvasState.updateShape(contextMenu.shapeId, { arrowStart: v }); setContextMenu(null); } : undefined}
             onArrowEnd={(shape.type === 'line' || shape.type === 'arrow') ? (v) => { canvasState.updateShape(contextMenu.shapeId, { arrowEnd: v }); setContextMenu(null); } : undefined}
+            onCopy={() => { canvasState.selectShape(contextMenu.shapeId); canvasState.copy(); setContextMenu(null); }}
+            onPaste={() => {
+              if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                const canvasCoords = screenToCanvas(contextMenu.x, contextMenu.y, rect, state.viewport);
+                canvasState.paste(canvasCoords.x, canvasCoords.y);
+              }
+              setContextMenu(null);
+            }}
             onDuplicate={() => { canvasState.selectShape(contextMenu.shapeId); canvasState.duplicate(); setContextMenu(null); }}
             onBringToFront={() => { canvasState.bringShapeToFront(contextMenu.shapeId); setContextMenu(null); }}
             onSendToBack={() => { canvasState.sendShapeToBack(contextMenu.shapeId); setContextMenu(null); }}
             onDelete={() => { setPendingDelete({ type: 'shape', shapeId: contextMenu.shapeId }); setContextMenu(null); }}
+            canPaste={canvasState.copiedBlocksCount > 0}
             onClose={() => setContextMenu(null)}
           />,
           document.body
@@ -1366,7 +1449,18 @@ export function CanvasEditorPopup({
             setEditLabelConnId(contextMenu.connId);
             setContextMenu(null);
           }}
+          onCopy={() => { canvasState.copy(); setContextMenu(null); }}
+          onPaste={() => {
+            if (containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect();
+              const canvasCoords = screenToCanvas(contextMenu.x, contextMenu.y, rect, state.viewport);
+              canvasState.paste(canvasCoords.x, canvasCoords.y);
+            }
+            setContextMenu(null);
+          }}
           onDelete={() => { setPendingDelete({ type: 'line', connId: contextMenu.connId }); setContextMenu(null); }}
+          canCopy={canvasState.selectedBlockIds.size > 0 || canvasState.selectedShapeIds.size > 0}
+          canPaste={canvasState.copiedBlocksCount > 0}
           onClose={() => setContextMenu(null)}
         />,
         document.body
@@ -1399,6 +1493,7 @@ export function CanvasEditorPopup({
             }
             setContextMenu(null);
           }}
+          onCopy={() => { canvasState.copy(); setContextMenu(null); }}
           onPaste={() => {
             if (containerRef.current) {
               const rect = containerRef.current.getBoundingClientRect();
@@ -1410,6 +1505,7 @@ export function CanvasEditorPopup({
           onZoomFit={() => { zoomToFit(); setContextMenu(null); }}
           onResetView={() => { resetView(); setContextMenu(null); }}
           onGridToggle={() => { canvasState.setGridEnabled(!state.gridEnabled); setContextMenu(null); }}
+          canCopy={canvasState.selectedBlockIds.size > 0 || canvasState.selectedShapeIds.size > 0 || canvasState.selectedConnectionIds.size > 0}
           canPaste={canvasState.copiedBlocksCount > 0}
           onClose={() => setContextMenu(null)}
         />,

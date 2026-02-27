@@ -72,6 +72,25 @@ export function useCreateProject() {
   });
 }
 
+// Delete project
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ projectId }: { projectId: string }) => {
+      const supabase = createClient();
+      const { error } = await supabase.from('projects').delete().eq('id', projectId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pm-projects'] });
+      queryClient.invalidateQueries({ queryKey: ['pm-project'] });
+      queryClient.invalidateQueries({ queryKey: ['modules'] });
+      queryClient.invalidateQueries({ queryKey: ['galactic-data'] });
+    },
+  });
+}
+
 // Update project
 export function useUpdateProject() {
   const queryClient = useQueryClient();
@@ -897,9 +916,9 @@ export function useCreateDependency() {
       dependencyType = 'depends_on',
       note,
     }: {
-      sourceType: 'module' | 'task' | 'subtask' | 'minitask';
+      sourceType: 'module' | 'task' | 'subtask' | 'minitask' | 'project';
       sourceId: string;
-      targetType: 'module' | 'task' | 'subtask' | 'minitask';
+      targetType: 'module' | 'task' | 'subtask' | 'minitask' | 'project';
       targetId: string;
       dependencyType?: 'blocks' | 'depends_on' | 'related_to';
       note?: string | null;

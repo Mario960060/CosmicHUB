@@ -10,6 +10,8 @@ import {
   eachDayOfInterval,
   addMonths,
   subMonths,
+  setYear,
+  getYear,
   isSameMonth,
   isSameDay,
   isToday,
@@ -17,7 +19,7 @@ import {
   startOfDay,
   getDay,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, Calendar, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Calendar, X } from 'lucide-react';
 
 const INPUT_DATE_FORMAT = 'yyyy-MM-dd';
 const DISPLAY_FORMAT = 'dd/MM/yyyy';
@@ -53,8 +55,10 @@ export function DatePicker({
     return startOfMonth(current);
   });
   const [hoveredDay, setHoveredDay] = useState<Date | null>(null);
+  const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const yearDropdownRef = useRef<HTMLDivElement>(null);
 
   const current = value ? parse(value, INPUT_DATE_FORMAT, new Date()) : null;
   const displayValue = current ? format(current, DISPLAY_FORMAT) : '';
@@ -101,6 +105,28 @@ export function DatePicker({
     return () => document.removeEventListener('keydown', handler);
   }, [isOpen]);
 
+  // Year dropdown click outside
+  useEffect(() => {
+    if (!yearDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (yearDropdownRef.current && !yearDropdownRef.current.contains(target)) {
+        setYearDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [yearDropdownOpen]);
+
+  // Scroll selected year into view when dropdown opens
+  const yearListRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (yearDropdownOpen && yearListRef.current) {
+      const selected = yearListRef.current.querySelector('[data-selected-year]');
+      selected?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+    }
+  }, [yearDropdownOpen]);
+
   const monthStart = startOfMonth(viewMonth);
   const monthEnd = endOfMonth(viewMonth);
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
@@ -146,6 +172,14 @@ export function DatePicker({
     e.preventDefault();
     e.stopPropagation();
     setViewMonth((m) => addMonths(m, 1));
+  };
+
+  const minYear = minDate ? getYear(minDate) : getYear(new Date()) - 20;
+  const maxYear = maxDate ? getYear(maxDate) : getYear(new Date()) + 10;
+  const years = Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i);
+
+  const handleYearChange = (year: number) => {
+    setViewMonth((m) => setYear(m, year));
   };
 
   const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -264,6 +298,7 @@ export function DatePicker({
               </button>
 
               <span
+                className="flex items-center gap-2"
                 style={{
                   fontFamily: "'Orbitron', sans-serif",
                   fontSize: '0.78rem',
@@ -273,7 +308,107 @@ export function DatePicker({
                   textTransform: 'uppercase',
                 }}
               >
-                {format(viewMonth, 'MMM yyyy')}
+                {format(viewMonth, 'MMM')}
+                <div ref={yearDropdownRef} style={{ position: 'relative' }}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setYearDropdownOpen((o) => !o);
+                    }}
+                    style={{
+                      fontFamily: "'Orbitron', sans-serif",
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      letterSpacing: '1px',
+                      color: '#00f0ff',
+                      background: yearDropdownOpen ? 'rgba(0, 240, 255, 0.12)' : 'rgba(0, 240, 255, 0.08)',
+                      border: `1px solid ${yearDropdownOpen ? 'rgba(0, 240, 255, 0.35)' : 'rgba(0, 240, 255, 0.2)'}`,
+                      borderRadius: '6px',
+                      padding: '4px 8px',
+                      cursor: 'pointer',
+                      outline: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!yearDropdownOpen) {
+                        e.currentTarget.style.background = 'rgba(0, 240, 255, 0.12)';
+                        e.currentTarget.style.borderColor = 'rgba(0, 240, 255, 0.35)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!yearDropdownOpen) {
+                        e.currentTarget.style.background = 'rgba(0, 240, 255, 0.08)';
+                        e.currentTarget.style.borderColor = 'rgba(0, 240, 255, 0.2)';
+                      }
+                    }}
+                  >
+                    {getYear(viewMonth)}
+                    <ChevronDown size={12} style={{ opacity: 0.8 }} />
+                  </button>
+                  {yearDropdownOpen && (
+                    <div
+                      ref={yearListRef}
+                      className="scrollbar-cosmic"
+                      style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        marginTop: '4px',
+                        minWidth: '100%',
+                        maxHeight: '260px',
+                        overflowY: 'auto',
+                        background: 'linear-gradient(170deg, rgba(8, 18, 38, 0.98) 0%, rgba(5, 10, 25, 0.99) 100%)',
+                        border: '1px solid rgba(0, 240, 255, 0.2)',
+                        borderRadius: '8px',
+                        zIndex: 10000,
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.6), 0 0 20px rgba(0, 240, 255, 0.06)',
+                      }}
+                    >
+                      {years.map((y) => (
+                        <button
+                          key={y}
+                          data-selected-year={getYear(viewMonth) === y ? '' : undefined}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleYearChange(y);
+                            setYearDropdownOpen(false);
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '6px 10px',
+                            textAlign: 'center',
+                            background: getYear(viewMonth) === y ? 'rgba(0, 240, 255, 0.15)' : 'transparent',
+                            border: 'none',
+                            color: getYear(viewMonth) === y ? '#00f0ff' : '#94a3b8',
+                            fontSize: '0.75rem',
+                            fontWeight: getYear(viewMonth) === y ? 600 : 400,
+                            cursor: 'pointer',
+                            fontFamily: "'Orbitron', sans-serif",
+                            transition: 'all 0.12s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (getYear(viewMonth) !== y) {
+                              e.currentTarget.style.background = 'rgba(0, 240, 255, 0.06)';
+                              e.currentTarget.style.color = '#e2e8f0';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (getYear(viewMonth) !== y) {
+                              e.currentTarget.style.background = 'transparent';
+                              e.currentTarget.style.color = '#94a3b8';
+                            }
+                          }}
+                        >
+                          {y}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </span>
 
               <button

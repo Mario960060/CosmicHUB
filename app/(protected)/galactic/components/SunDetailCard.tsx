@@ -14,9 +14,9 @@ import {
   getStatusDotColor,
   getInitials,
   renderStars,
-  formatDependencyType,
   getDependencyTypeColor,
   HierarchyMetaRow,
+  DependencyRow,
 } from './DetailCardShared';
 import {
   calculateProjectProgress,
@@ -34,8 +34,9 @@ import {
 interface SunDetailCardProps {
   projectId: string;
   onClose: () => void;
-  /** Zoom to module view (pass moduleId to zoom to) */
   onZoomIn?: (moduleId: string) => void;
+  onContextMenu?: (object: { id: string; type: 'project' | 'module' | 'task' | 'subtask'; name: string; metadata?: Record<string, unknown> }, e: React.MouseEvent) => void;
+  onNavigateToSubtask?: (subtaskId: string) => void;
 }
 
 interface ProjectWithModules {
@@ -167,7 +168,7 @@ function useSunDetails(projectId: string | null) {
   });
 }
 
-export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardProps) {
+export function SunDetailCard({ projectId, onClose, onZoomIn, onContextMenu, onNavigateToSubtask }: SunDetailCardProps) {
   const [expandedHierarchy, setExpandedHierarchy] = useState(false);
   const [expandedDeps, setExpandedDeps] = useState(false);
   const [expandedTeam, setExpandedTeam] = useState(false);
@@ -218,6 +219,7 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
     return (
       <div
         onClick={onClose}
+        onContextMenu={(e) => e.preventDefault()}
         style={{
           position: 'fixed',
           inset: 0,
@@ -235,6 +237,14 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
       </div>
     );
   }
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.target !== e.currentTarget && onContextMenu) {
+      onContextMenu({ id: projectId, type: 'project', name: data.name, metadata: { projectId } }, e);
+    }
+  };
 
   const projectSubtasks = projectSubtasksPre;
   const allTasks = modules.flatMap((m) => m.tasks || []);
@@ -270,6 +280,8 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
 
   return (
     <div
+      onContextMenuCapture={(e) => e.preventDefault()}
+      onContextMenu={handleContextMenu}
       style={{
         position: 'fixed',
         inset: 0,
@@ -448,6 +460,7 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
                   <div key={mod.id} style={{ marginBottom: 8 }}>
                     <button
                       onClick={() => toggleModule(mod.id)}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ id: mod.id, type: 'module', name: mod.name, metadata: { projectId, moduleId: mod.id } }, e); }}
                       style={{
                         width: '100%',
                         display: 'flex',
@@ -493,6 +506,7 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
                             <div key={task.id} style={{ marginBottom: 6 }}>
                               <button
                                 onClick={() => toggleTask(task.id)}
+                                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ id: task.id, type: 'task', name: task.name, metadata: { projectId, moduleId: mod.id, taskId: task.id } }, e); }}
                                 style={{
                                   width: '100%',
                                   display: 'flex',
@@ -524,7 +538,11 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
                               {taskExp && (
                                 <div style={{ paddingLeft: 24 }}>
                                   {(task.subtasks || []).map((st) => (
-                                    <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 16, padding: '4px 0' }}>
+                                    <div
+                                      key={st.id}
+                                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ id: st.id, type: 'subtask', name: st.name, metadata: { projectId, moduleId: mod.id, taskId: task.id, subtaskId: st.id } }, e); }}
+                                      style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 16, padding: '4px 0', cursor: 'context-menu' }}
+                                    >
                                       <SubtaskTypeIcon satelliteType={(st as { satellite_type?: string }).satellite_type} size={10} />
                                       <span style={{ fontSize: 12 }}>{st.name}</span>
                                     </div>
@@ -538,7 +556,11 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
                           <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                             <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginBottom: 4 }}>On module:</div>
                             {(mod.subtasks || []).map((st) => (
-                              <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 0, padding: '4px 0' }}>
+                              <div
+                                key={st.id}
+                                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ id: st.id, type: 'subtask', name: st.name, metadata: { projectId, moduleId: mod.id, subtaskId: st.id } }, e); }}
+                                style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 0, padding: '4px 0', cursor: 'context-menu' }}
+                              >
                                 <SubtaskTypeIcon satelliteType={(st as { satellite_type?: string }).satellite_type} size={10} />
                                 <span>{st.name}</span>
                               </div>
@@ -574,19 +596,9 @@ export function SunDetailCard({ projectId, onClose, onZoomIn }: SunDetailCardPro
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)' }}>
               {dependencies && dependencies.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {dependencies.map((dep) => {
-                    const from = dep.dependent_subtask?.name || '?';
-                    const to = dep.depends_on_subtask?.name || '?';
-                    const typ = dep.dependency_type || 'depends_on';
-                    const color = getDependencyTypeColor(typ);
-                    return (
-                      <div key={dep.id} style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                        <span style={{ color, fontSize: 11, fontWeight: 600 }}>{formatDependencyType(typ)}</span>
-                        {dep.note && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>{dep.note}</div>}
-                        <div style={{ marginTop: 2 }}>{from} → {to}</div>
-                      </div>
-                    );
-                  })}
+                  {dependencies.map((dep) => (
+                    <DependencyRow key={dep.id} dep={dep} onNavigateToSubtask={onNavigateToSubtask} />
+                  ))}
                 </div>
               ) : (
                 <div style={{ color: 'rgba(255,255,255,0.5)' }}>No dependencies between subtasks.</div>

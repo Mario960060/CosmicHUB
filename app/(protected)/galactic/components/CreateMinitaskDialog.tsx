@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
-import { useCreateMinitask } from '@/lib/pm/mutations';
+import { useCreateMinitask, useCreateDependency } from '@/lib/pm/mutations';
+import { DependencyTargetPicker, type SelectedTarget } from '@/components/DependencyTargetPicker';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -51,6 +52,9 @@ export function CreateMinitaskDialog({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
   const [hoveredClose, setHoveredClose] = useState(false);
+  const [dependsOnTargets, setDependsOnTargets] = useState<SelectedTarget[]>([]);
+
+  const createDependency = useCreateDependency();
 
   useEffect(() => {
     if (open && initialAsteroidType) {
@@ -58,7 +62,7 @@ export function CreateMinitaskDialog({
     }
   }, [open, initialAsteroidType]);
 
-  const hasUnsavedChanges = name.trim() || description.trim() || estimatedHours || dueDate;
+  const hasUnsavedChanges = name.trim() || description.trim() || estimatedHours || dueDate || dependsOnTargets.length > 0;
 
   const handleClose = async () => {
     if (hasUnsavedChanges) {
@@ -97,6 +101,21 @@ export function CreateMinitaskDialog({
         dueDate: dueDate || undefined,
       });
 
+      const newMinitaskId = (data as { id: string }).id;
+      for (const t of dependsOnTargets) {
+        try {
+          await createDependency.mutateAsync({
+            sourceType: 'minitask',
+            sourceId: newMinitaskId,
+            targetType: t.type,
+            targetId: t.id,
+            dependencyType: 'depends_on',
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+
       onSuccess?.(data as { id: string });
       setName('');
       setDescription('');
@@ -104,6 +123,7 @@ export function CreateMinitaskDialog({
       setPriorityStars('1.0');
       setDueDate('');
       setAsteroidType('rocky');
+      setDependsOnTargets([]);
       setErrors({});
       onClose();
     } catch (err) {
@@ -146,6 +166,9 @@ export function CreateMinitaskDialog({
         style={{
           width: '100%',
           maxWidth: 520,
+          maxHeight: '90vh',
+          display: 'flex',
+          flexDirection: 'column',
           background: 'rgba(21, 27, 46, 0.95)',
           backdropFilter: 'blur(30px)',
           border: `1px solid ${cardTheme.border}`,
@@ -161,6 +184,7 @@ export function CreateMinitaskDialog({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexShrink: 0,
           }}
         >
           <h2 style={{ fontSize: 20, fontFamily: 'Orbitron, sans-serif', color: cardTheme.header, fontWeight: 'bold', margin: 0 }}>
@@ -187,7 +211,7 @@ export function CreateMinitaskDialog({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ padding: '28px' }}>
+        <form onSubmit={handleSubmit} className="scrollbar-cosmic" style={{ padding: '28px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0 }}>
           <div style={{ marginBottom: 20 }}>
             <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: cardTheme.header, marginBottom: 8 }}>
               Name <span style={{ color: '#ef4444' }}>*</span>
@@ -325,6 +349,28 @@ export function CreateMinitaskDialog({
               />
             </div>
           </div>
+
+          {/* Depends on (optional) */}
+          {projectId && (
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: cardTheme.header, marginBottom: 8 }}>
+                Depends on (optional)
+              </label>
+              <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 8 }}>
+                Ten minitask zależy od ukończenia:
+              </p>
+              <DependencyTargetPicker
+                projectId={projectId}
+                selectedTargets={dependsOnTargets}
+                onToggleTarget={(t) => {
+                  setDependsOnTargets((prev) => {
+                    const exists = prev.some((x) => x.type === t.type && x.id === t.id);
+                    return exists ? prev.filter((x) => !(x.type === t.type && x.id === t.id)) : [...prev, t];
+                  });
+                }}
+              />
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
             <button

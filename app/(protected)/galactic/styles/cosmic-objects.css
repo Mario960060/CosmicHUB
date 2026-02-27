@@ -1669,7 +1669,7 @@
   100% { right: calc(100% - 10px); opacity: 0; }
 }
 
-/* Satellite Label */
+/* Satellite Label – czytelne jak moduły/taski */
 .sat-name-label {
   position: absolute;
   bottom: -18px;
@@ -1677,16 +1677,14 @@
   transform: translateX(-50%);
   font-family: 'Exo 2', sans-serif;
   font-size: 10px;
-  font-weight: 500;
-  color: var(--cyan-accent);
-  text-shadow: 0 0 6px rgba(0, 240, 255, 0.6);
-  max-width: 70px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  max-width: 80px;
   text-align: center;
   word-wrap: break-word;
   overflow-wrap: break-word;
   word-break: break-word;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
   line-height: 1.2;
 }
 
@@ -1888,15 +1886,18 @@
 .asteroid.xs .asteroid-labels-inset { display: none; }
 .asteroid.xs .object-stars-crown { display: none; }
 
-/* Solar System: minitaski 2× większe niż xs */
+/* Solar System: minitaski przy taskach – jak solar-sm, nazwy i deadline w środku, bez animacji */
 .asteroid.solar-xs {
-  width: 24px;
-  height: 24px;
+  width: 36px;
+  height: 36px;
+  animation: none !important;
 }
 
 .asteroid.solar-xs .asteroid-crater { display: none; }
-.asteroid.solar-xs .asteroid-labels-inset { display: none; }
-.asteroid.solar-xs .object-stars-crown { display: none; }
+.asteroid.solar-xs .asteroid-labels-inset { display: flex !important; }
+.asteroid.solar-xs .asteroid-name-label { font-size: 9px !important; font-weight: 700; color: rgba(255,255,255,0.95); }
+.asteroid.solar-xs .asteroid-deadline-label { font-size: 9px !important; }
+.asteroid.solar-xs .object-stars-crown { display: flex !important; font-size: 10px; }
 
 /* Solar System: minitaski przypisane do projektu – 70% planety (100px → 70px) */
 .asteroid.solar-project {
@@ -1905,6 +1906,8 @@
 }
 
 .asteroid.solar-project .asteroid-crater { display: none; }
+.asteroid.solar-project .asteroid-labels-inset { display: flex !important; }
+.asteroid.solar-project .asteroid-name-label { font-size: 11px !important; font-weight: 700; color: rgba(255,255,255,0.95); }
 
 /* Solar System: minitaski na poziomie modułu – ~30% mniejsze niż taski (54px → 38px) */
 .asteroid.solar-sm {
@@ -1913,6 +1916,9 @@
 }
 
 .asteroid.solar-sm .asteroid-crater { display: none; }
+/* Solar System: minitaski modułu (solar-sm) – nazwy i gwiazdki czytelne jak moduły/taski */
+.asteroid.solar-sm .asteroid-labels-inset { display: flex !important; }
+.asteroid.solar-sm .asteroid-name-label { font-size: 10px !important; font-weight: 700; color: rgba(255,255,255,0.95); }
 
 /* Task-zoom: powiększone moon (task) i asteroidy (minitaski) o ~125% (2× 50%) */
 #galaxy-canvas.task-zoom-view .moon:not(.sm) {

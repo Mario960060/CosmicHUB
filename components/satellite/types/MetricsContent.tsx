@@ -15,7 +15,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { Star, Plus, TrendingUp, TrendingDown, Trash2, Pencil } from 'lucide-react';
+import { Star, Plus, TrendingUp, TrendingDown, Trash2, Pencil, GripVertical } from 'lucide-react';
 
 interface MetricDataPoint {
   value: number;
@@ -30,17 +30,19 @@ interface Metric {
   target: number | null;
   type: 'number';
   history: MetricDataPoint[];
+  order: number;
 }
 
 interface MetricsContentProps {
   subtaskId: string;
   satelliteData: Record<string, unknown>;
+  canReorder?: boolean;
 }
 
 function getMetrics(data: Record<string, unknown>): Metric[] {
   const raw = data.metrics;
   if (!Array.isArray(raw)) return [];
-  return raw.map((m: any) => ({
+  return raw.map((m: any, idx: number) => ({
     id: m.id || crypto.randomUUID(),
     label: m.label || 'Metric',
     value: Number(m.value) ?? 0,
@@ -53,6 +55,7 @@ function getMetrics(data: Record<string, unknown>): Metric[] {
           date: h.date || new Date().toISOString().slice(0, 10),
         }))
       : [],
+    order: typeof m.order === 'number' ? m.order : idx,
   }));
 }
 
@@ -61,7 +64,7 @@ function formatDate(d: string) {
   return date.toLocaleDateString('pl-PL', { day: '2-digit', month: 'short' });
 }
 
-export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps) {
+export function MetricsContent({ subtaskId, satelliteData, canReorder = false }: MetricsContentProps) {
   const { user } = useAuth();
   const invalidate = useInvalidateSatelliteQueries();
   const [metrics, setMetrics] = useState<Metric[]>(() => getMetrics(satelliteData));
@@ -82,6 +85,26 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
   const [editingValueFor, setEditingValueFor] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  const reorderMetrics = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    const sorted = [...metrics].sort((a, b) => a.order - b.order);
+    const reordered = [...sorted];
+    const [removed] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, removed);
+    const next = reordered.map((m, idx) => ({ ...m, order: idx }));
+    save(next, undefined, undefined, user ? { user_id: user.id, action: 'reordered_metrics', detail: '', actor_name: user.full_name } : undefined);
+    setDraggedIndex(toIndex);
+  };
+
+  const handleMetricDragStart = (index: number) => setDraggedIndex(index);
+  const handleMetricDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null) return;
+    if (draggedIndex !== index) reorderMetrics(draggedIndex, index);
+  };
+  const handleMetricDragEnd = () => setDraggedIndex(null);
 
   useEffect(() => {
     setMetrics(getMetrics(satelliteData));
@@ -126,8 +149,9 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
       target,
       type: 'number',
       history: [{ value, date: new Date().toISOString().slice(0, 10) }],
+      order: 0,
     };
-    const next = [m, ...metrics];
+    const next = [m, ...metrics.map((x, idx) => ({ ...x, order: idx + 1 }))];
     save(next, undefined, undefined, user ? { user_id: user.id, action: 'added_metric', detail: label, actor_name: user.full_name } : undefined);
     setAddLabel('');
     setAddValue('');
@@ -138,7 +162,7 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
 
   const deleteMetric = (metricId: string) => {
     const m = metrics.find((x) => x.id === metricId);
-    const next = metrics.filter((x) => x.id !== metricId);
+    const next = metrics.filter((x) => x.id !== metricId).map((x, idx) => ({ ...x, order: idx }));
     const newPrimary = primaryMetricId === metricId ? (next[0]?.id ?? null) : primaryMetricId;
     save(next, newPrimary, undefined, user ? { user_id: user.id, action: 'deleted_metric', detail: m?.label ?? '' } : undefined);
   };
@@ -178,6 +202,7 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
 
   const primaryMetric = metrics.find((m) => m.id === primaryMetricId);
   const chartData = primaryMetric?.history ?? [];
+  const sortedMetrics = [...metrics].sort((a, b) => a.order - b.order);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -267,7 +292,7 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {metrics.map((m) => {
+        {sortedMetrics.map((m, index) => {
           const pctTarget =
             m.target != null && m.target !== 0
               ? Math.round((m.value / m.target) * 100)
@@ -278,11 +303,17 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
           return (
             <div
               key={m.id}
+              draggable={canReorder}
+              onDragStart={() => canReorder && handleMetricDragStart(index)}
+              onDragOver={(e) => canReorder && handleMetricDragOver(e, index)}
+              onDragEnd={() => handleMetricDragEnd()}
               style={{
                 padding: '14px 16px',
                 background: 'rgba(0, 0, 0, 0.2)',
                 border: '1px solid rgba(251, 191, 36, 0.15)',
                 borderRadius: '10px',
+                cursor: canReorder ? 'grab' : 'default',
+                opacity: draggedIndex === index ? 0.5 : 1,
               }}
             >
               <div
@@ -294,6 +325,14 @@ export function MetricsContent({ subtaskId, satelliteData }: MetricsContentProps
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {canReorder && (
+                    <div
+                      style={{ cursor: 'grab', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <GripVertical size={16} />
+                    </div>
+                  )}
                   <span style={{ fontWeight: 600, fontSize: '14px', color: '#fff' }}>
                     {m.label}
                   </span>

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
 import { toast } from 'sonner';
-import { Trash2, FileText, Check } from 'lucide-react';
+import { Trash2, FileText, Check, GripVertical, Maximize2, Minimize2 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { format } from 'date-fns';
 import { formatRelativeTime } from '@/lib/utils';
@@ -21,6 +21,7 @@ interface NoteItem {
 interface NotesContentProps {
   subtaskId: string;
   satelliteData: Record<string, unknown>;
+  canReorder?: boolean;
 }
 
 /** Ensure content is HTML; wrap plain text in <p> for backward compatibility */
@@ -67,8 +68,8 @@ function getNotes(data: Record<string, unknown>): NoteItem[] {
   return [];
 }
 
-const FONT_OPTIONS = ['Exo 2', 'Rajdhani', 'Orbitron', 'JetBrains Mono'];
-const SIZE_OPTIONS = ['11', '12', '14', '16', '18', '22', '28'];
+const FONT_OPTIONS = ['Exo 2', 'Rajdhani', 'Orbitron', 'JetBrains Mono', 'Inter', 'Georgia', 'Arial', 'Monaco', 'Courier New'];
+const SIZE_OPTIONS = ['12', '14', '16', '18', '20', '22', '24', '28'];
 const TEXT_COLORS = [
   { name: 'White', value: 'rgba(255,255,255,0.85)', title: 'White' },
   { name: 'Indigo', value: '#818cf8', title: 'Indigo' },
@@ -86,7 +87,7 @@ const HIGHLIGHT_COLORS = [
   { name: 'Purple', value: 'rgba(168,85,247,0.3)', title: 'Purple' },
 ];
 
-export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
+export function NotesContent({ subtaskId, satelliteData, canReorder = false }: NotesContentProps) {
   const { user } = useAuth();
   const invalidate = useInvalidateSatelliteQueries();
   const invalidateRef = useRef(invalidate);
@@ -103,6 +104,27 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [fullWindow, setFullWindow] = useState(false);
+
+  const reorderNotes = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    const sorted = [...notes].sort((a, b) => a.order - b.order);
+    const reordered = [...sorted];
+    const [removed] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, removed);
+    const next = reordered.map((n, idx) => ({ ...n, order: idx }));
+    save(next, user ? { user_id: user.id, action: 'reordered_notes', detail: '', actor_name: user.full_name } : undefined);
+    setDraggedIndex(toIndex);
+  };
+
+  const handleNoteDragStart = (index: number) => setDraggedIndex(index);
+  const handleNoteDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null) return;
+    if (draggedIndex !== index) reorderNotes(draggedIndex, index);
+  };
+  const handleNoteDragEnd = () => setDraggedIndex(null);
 
   const dataKey = `${subtaskId}:${JSON.stringify(satelliteData.notes)}:${String(satelliteData.content ?? '')}`;
 
@@ -207,11 +229,14 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
       setNotes(nextNotes);
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
-        save(nextNotes);
+        const note = openNoteId ? nextNotes.find((n) => n.id === openNoteId) : null;
+        save(nextNotes, user && note
+          ? { user_id: user.id, action: 'edited_note', detail: note.name || 'Untitled', actor_name: user.full_name }
+          : undefined);
         saveTimeoutRef.current = null;
       }, 2000);
     },
-    [save]
+    [save, openNoteId, user]
   );
 
   const openNote = (note: NoteItem) => {
@@ -233,6 +258,7 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
     }
     setOpenNoteId(null);
     setPendingDeleteNoteId(null);
+    setFullWindow(false);
   }, [openNoteId, notes, editName, editContent, save, user]);
 
   const handleContentChange = () => {
@@ -248,6 +274,87 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
 
   const handleContentKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!contentRef.current) return;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        document.execCommand('outdent', false);
+      } else {
+        document.execCommand('indent', false);
+      }
+      handleContentChange();
+      return;
+    }
+
+    if (e.key === ' ') {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const node = sel.anchorNode;
+        const text = node?.nodeType === Node.TEXT_NODE ? (node as Text).textContent ?? '' : (node?.textContent ?? '');
+        const beforeCursor = text.slice(0, sel.anchorOffset).trim();
+        let blockTag: string | null = null;
+        if (beforeCursor === '#') blockTag = 'h1';
+        else if (beforeCursor === '##') blockTag = 'h2';
+        else if (beforeCursor === '###') blockTag = 'h3';
+        else if (beforeCursor === '-' || beforeCursor === '*') blockTag = 'ul';
+        else if (beforeCursor === '>') blockTag = 'blockquote';
+        else if (/^\d+\.$/.test(beforeCursor)) blockTag = 'ol';
+        if (blockTag && node) {
+          e.preventDefault();
+          const range = sel.getRangeAt(0);
+          const startOffset = Math.max(0, sel.anchorOffset - beforeCursor.length);
+          range.setStart(node, startOffset);
+          range.setEnd(node, sel.anchorOffset);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          document.execCommand('delete', false);
+          if (blockTag === 'ul') document.execCommand('insertUnorderedList', false);
+          else if (blockTag === 'ol') document.execCommand('insertOrderedList', false);
+          else if (blockTag === 'blockquote') document.execCommand('formatBlock', false, '<blockquote>');
+          else document.execCommand('formatBlock', false, `<${blockTag}>`);
+          handleContentChange();
+          return;
+        }
+      }
+    }
+
+    if (e.key === 'Enter') {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        let n: Node | null = sel.anchorNode;
+        let block: HTMLElement | null = null;
+        const blockTags = ['LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3'];
+        while (n && n !== contentRef.current) {
+          if (n.nodeType === Node.ELEMENT_NODE && blockTags.includes((n as HTMLElement).tagName)) {
+            block = n as HTMLElement;
+            break;
+          }
+          n = n.parentNode;
+        }
+        const isEmpty = block && (block.textContent?.trim() ?? '') === '';
+        if (block?.tagName === 'LI' && isEmpty) {
+          e.preventDefault();
+          document.execCommand('outdent', false);
+          document.execCommand('formatBlock', false, 'p');
+          handleContentChange();
+          return;
+        }
+        if (block?.tagName === 'BLOCKQUOTE' && isEmpty) {
+          e.preventDefault();
+          document.execCommand('outdent', false);
+          document.execCommand('formatBlock', false, 'p');
+          handleContentChange();
+          return;
+        }
+        if (block && ['H1', 'H2', 'H3'].includes(block.tagName) && isEmpty) {
+          e.preventDefault();
+          document.execCommand('formatBlock', false, 'p');
+          handleContentChange();
+          return;
+        }
+      }
+    }
+
     if (e.key !== 'Backspace' && e.key !== 'Enter') return;
 
     const sel = window.getSelection();
@@ -329,6 +436,7 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
   };
 
   const openedNote = openNoteId ? notes.find((n) => n.id === openNoteId) : null;
+  const sortedNotes = [...notes].sort((a, b) => a.order - b.order);
   const wordCount = getWordCount(editContent);
   const modalRoot = mounted && typeof document !== 'undefined' ? document.getElementById('modal-root') : null;
 
@@ -351,10 +459,10 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
         <div
           className="note-editor-popup"
           style={{
-            width: '100%',
-            maxWidth: 880,
-            height: '90vh',
-            maxHeight: 760,
+            width: fullWindow ? '100vw' : '100%',
+            maxWidth: fullWindow ? 'none' : 880,
+            height: fullWindow ? '100vh' : '90vh',
+            maxHeight: fullWindow ? 'none' : 760,
             background: 'radial-gradient(ellipse at 12% 8%, rgba(129,140,248,0.04) 0%, transparent 40%), radial-gradient(ellipse at 88% 92%, rgba(129,140,248,0.02) 0%, transparent 40%), #0a1628',
             border: '1px solid rgba(129,140,248,0.2)',
             borderRadius: 16,
@@ -423,6 +531,28 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
                 </div>
               )}
             </div>
+            <button
+              type="button"
+              onClick={() => setFullWindow((v) => !v)}
+              title={fullWindow ? 'Window mode' : 'Full window'}
+              style={{
+                padding: '6px 12px',
+                fontFamily: 'Rajdhani, sans-serif',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'rgba(0,0,0,0.2)',
+                color: 'rgba(255,255,255,0.4)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              {fullWindow ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              {fullWindow ? 'Window' : 'Full'}
+            </button>
             <button
               type="button"
               onClick={closeNotePopup}
@@ -515,9 +645,9 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
               }}
               defaultValue="14"
               onChange={(e) => {
-                const sizes = ['1', '2', '3', '4', '5', '6', '7'];
+                const htmlSizes = ['1', '2', '3', '4', '5', '6', '7'];
                 const idx = SIZE_OPTIONS.indexOf(e.target.value);
-                execCmd('fontSize', sizes[Math.min(idx, 6)] ?? '4');
+                execCmd('fontSize', htmlSizes[Math.min(Math.max(idx, 0), 6)] ?? '3');
               }}
             >
               {SIZE_OPTIONS.map((s) => (
@@ -1123,11 +1253,15 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
 
       {/* List of notes */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {notes.map((note) => (
+        {sortedNotes.map((note, index) => (
           <div
             key={note.id}
             role="button"
             tabIndex={0}
+            draggable={canReorder}
+            onDragStart={() => canReorder && handleNoteDragStart(index)}
+            onDragOver={(e) => canReorder && handleNoteDragOver(e, index)}
+            onDragEnd={() => handleNoteDragEnd()}
             onClick={() => openNote(note)}
             onKeyDown={(e) => e.key === 'Enter' && openNote(note)}
             style={{
@@ -1138,8 +1272,9 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
               display: 'flex',
               alignItems: 'center',
               gap: '10px',
-              cursor: 'pointer',
+              cursor: canReorder ? 'grab' : 'pointer',
               transition: 'border-color 0.15s, background 0.15s',
+              opacity: draggedIndex === index ? 0.5 : 1,
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.borderColor = 'rgba(129, 140, 248, 0.4)';
@@ -1150,6 +1285,14 @@ export function NotesContent({ subtaskId, satelliteData }: NotesContentProps) {
               e.currentTarget.style.background = 'rgba(0, 0, 0, 0.2)';
             }}
           >
+            {canReorder && (
+              <div
+                style={{ cursor: 'grab', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <GripVertical size={16} />
+              </div>
+            )}
             <FileText size={16} style={{ color: 'rgba(129, 140, 248, 0.7)', flexShrink: 0 }} />
             <span style={{ flex: 1, fontSize: '14px', color: 'rgba(255, 255, 255, 0.9)', fontWeight: 500 }}>
               {note.name || 'Untitled'}

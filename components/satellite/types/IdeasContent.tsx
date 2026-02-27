@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { createClient } from '@/lib/supabase/client';
 import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
 import { toast } from 'sonner';
-import { Plus, MoreVertical, Trash2 } from 'lucide-react';
+import { Plus, MoreVertical, Trash2, GripVertical } from 'lucide-react';
 import { CosmicDropdown } from '../CosmicDropdown';
 
 interface Idea {
@@ -21,6 +21,7 @@ interface Idea {
   promoted_by?: string[];
   created_by?: string;
   created_at?: string;
+  order: number;
 }
 
 interface ProjectMember {
@@ -35,6 +36,7 @@ interface IdeasContentProps {
   projectId?: string;
   subtaskName?: string;
   projectMembers?: ProjectMember[];
+  canReorder?: boolean;
 }
 
 function priorityToRating(p: string): number {
@@ -46,7 +48,7 @@ function priorityToRating(p: string): number {
 function getIdeas(data: Record<string, unknown>): Idea[] {
   const raw = data.ideas;
   if (!Array.isArray(raw)) return [];
-  return raw.map((i: any) => {
+  return raw.map((i: any, idx: number) => {
     const hasRating = typeof i.rating === 'number' && i.rating >= 0.5 && i.rating <= 3;
     return {
       id: i.id || crypto.randomUUID(),
@@ -61,6 +63,7 @@ function getIdeas(data: Record<string, unknown>): Idea[] {
       promoted_by: Array.isArray(i.promoted_by) ? i.promoted_by : [],
       created_by: i.created_by,
       created_at: i.created_at || new Date().toISOString(),
+      order: typeof i.order === 'number' ? i.order : idx,
     };
   });
 }
@@ -72,6 +75,7 @@ export function IdeasContent({
   projectId,
   subtaskName = '',
   projectMembers = [],
+  canReorder = false,
 }: IdeasContentProps) {
   const { user } = useAuth();
   const invalidate = useInvalidateSatelliteQueries();
@@ -85,6 +89,26 @@ export function IdeasContent({
   const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [descriptionPopupId, setDescriptionPopupId] = useState<string | null>(null);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  const reorderIdeas = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    const sorted = [...ideas].sort((a, b) => a.order - b.order);
+    const reordered = [...sorted];
+    const [removed] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, removed);
+    const next = reordered.map((i, idx) => ({ ...i, order: idx }));
+    save(next, { user_id: user!.id, action: 'reordered_ideas', detail: '', actor_name: user!.full_name });
+    setDraggedIndex(toIndex);
+  };
+
+  const handleIdeaDragStart = (index: number) => setDraggedIndex(index);
+  const handleIdeaDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null) return;
+    if (draggedIndex !== index) reorderIdeas(draggedIndex, index);
+  };
+  const handleIdeaDragEnd = () => setDraggedIndex(null);
 
   useEffect(() => {
     setIdeas(getIdeas(satelliteData));
@@ -132,8 +156,9 @@ export function IdeasContent({
       promoted_by: [],
       created_by: user.id,
       created_at: new Date().toISOString(),
+      order: 0,
     };
-    const next = [idea, ...ideas];
+    const next = [idea, ...ideas.map((i, idx) => ({ ...i, order: idx + 1 }))];
     save(next, { user_id: user.id, action: 'added_idea', detail: idea.name, actor_name: user.full_name });
     setNewName('');
     setNewDescription('');
@@ -181,13 +206,9 @@ export function IdeasContent({
     }
   };
 
-  const filtered = ideas
-    .filter((i) => filter === 'all' || i.status === filter)
-    .sort((a, b) => {
-      const ta = new Date(a.created_at ?? 0).getTime();
-      const tb = new Date(b.created_at ?? 0).getTime();
-      return tb - ta;
-    });
+  const sortedByOrder = [...ideas].sort((a, b) => a.order - b.order);
+  const filtered = sortedByOrder.filter((i) => filter === 'all' || i.status === filter);
+  const showDragHandle = canReorder && filter === 'all';
 
   const renderRatingStars = (rating: number, onClick?: (r: number) => void) => {
     const r = Math.min(3, Math.max(0.5, rating));
@@ -343,11 +364,15 @@ export function IdeasContent({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {filtered.map((idea) => {
+        {filtered.map((idea, index) => {
           const showDescriptionPopup = descriptionPopupId === idea.id;
           return (
             <div
               key={idea.id}
+              draggable={showDragHandle}
+              onDragStart={() => showDragHandle && handleIdeaDragStart(index)}
+              onDragOver={(e) => showDragHandle && handleIdeaDragOver(e, index)}
+              onDragEnd={() => handleIdeaDragEnd()}
               onClick={() => setDescriptionPopupId(idea.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -359,10 +384,19 @@ export function IdeasContent({
                 border: '1px solid rgba(168, 85, 247, 0.15)',
                 borderRadius: '10px',
                 position: 'relative',
-                cursor: 'pointer',
+                cursor: showDragHandle ? 'grab' : 'pointer',
+                opacity: draggedIndex === index ? 0.5 : 1,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                {showDragHandle && (
+                  <div
+                    style={{ cursor: 'grab', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <GripVertical size={16} />
+                  </div>
+                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: 0, fontSize: '14px', color: '#fff', lineHeight: 1.4 }}>
                     {idea.name}

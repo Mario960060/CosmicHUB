@@ -3,21 +3,22 @@
 import { useState } from 'react';
 import { useCreateDependency } from '@/lib/pm/mutations';
 import type { DependencyType } from '@/lib/pm/queries';
+import './AddDependencyPopup.css';
 
 interface AddDependencyPopupProps {
   sourceEntityId: string;
-  sourceEntityType: 'module' | 'task' | 'subtask' | 'minitask';
+  sourceEntityType: 'module' | 'task' | 'subtask' | 'minitask' | 'project';
   targetEntityId: string;
-  targetEntityType: 'module' | 'task' | 'subtask' | 'minitask';
+  targetEntityType: 'module' | 'task' | 'subtask' | 'minitask' | 'project';
   targetEntityName: string;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-const DEPENDENCY_OPTIONS: { value: DependencyType; label: string }[] = [
-  { value: 'blocks', label: 'Blocks – B cannot start until A is done' },
-  { value: 'depends_on', label: 'Depends on – A should follow B' },
-  { value: 'related_to', label: 'Related to – informational link' },
+const TYPE_CONFIG: { value: DependencyType; selClass: string; dotClass: string; name: string; desc: string }[] = [
+  { value: 'blocks', selClass: 'add-dep-sel-blocks', dotClass: 'add-dep-dot-red', name: 'Blocks', desc: 'Must complete first' },
+  { value: 'depends_on', selClass: 'add-dep-sel-depends', dotClass: 'add-dep-dot-amber', name: 'Depends on', desc: 'Should follow' },
+  { value: 'related_to', selClass: 'add-dep-sel-related', dotClass: 'add-dep-dot-indigo', name: 'Related to', desc: 'Informational' },
 ];
 
 export function AddDependencyPopup({
@@ -50,104 +51,80 @@ export function AddDependencyPopup({
   };
 
   return (
-    <>
+    <div className="add-dep-backdrop">
       <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.5)',
-          zIndex: 59,
-        }}
-      />
-      <div
+        className="add-dep-dialog"
         onClick={(e) => e.stopPropagation()}
-        style={{
-          position: 'fixed',
-          left: '50%',
-          top: '50%',
-          transform: 'translate(-50%, -50%)',
-          zIndex: 60,
-          width: 320,
-        background: 'rgba(21, 27, 46, 0.98)',
-        border: '1px solid rgba(0, 217, 255, 0.4)',
-        borderRadius: 12,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-        padding: 16,
-      }}
-    >
-      <div style={{ marginBottom: 12, fontSize: 13, color: 'rgba(255,255,255,0.8)' }}>
-        Add dependency → <strong>{targetEntityName}</strong>
-      </div>
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ display: 'block', fontSize: 11, color: 'rgba(255,255,255,0.6)', marginBottom: 4 }}>Type</label>
-        <select
-          value={type}
-          onChange={(e) => setType(e.target.value as DependencyType)}
-          className="glass-input"
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            fontSize: 13,
-          }}
-        >
-          {DEPENDENCY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <label style={{ display: 'block', fontSize: 11, color: 'rgba(255,255,255,0.6)', marginBottom: 4 }}>Note (optional)</label>
-        <input
-          type="text"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Short note..."
-          maxLength={200}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            background: 'rgba(0,0,0,0.3)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: 8,
-            color: '#fff',
-            fontSize: 13,
-            boxSizing: 'border-box',
-          }}
-        />
-      </div>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button
-          onClick={onClose}
-          style={{
-            padding: '8px 16px',
-            background: 'rgba(255,255,255,0.1)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: 8,
-            color: 'rgba(255,255,255,0.8)',
-            fontSize: 13,
-            cursor: 'pointer',
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSubmit}
-          disabled={createDependency.isPending}
-          style={{
-            padding: '8px 16px',
-            background: 'rgba(0, 217, 255, 0.3)',
-            border: '1px solid rgba(0, 217, 255, 0.5)',
-            borderRadius: 8,
-            color: '#00d9ff',
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: createDependency.isPending ? 'wait' : 'pointer',
-          }}
-        >
-          {createDependency.isPending ? 'Adding...' : 'Add'}
-        </button>
+        role="dialog"
+        aria-labelledby="add-dep-title"
+      >
+        <div className="add-dep-header">
+          <div className="add-dep-icon">
+            <svg viewBox="0 0 24 24">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+          </div>
+          <div id="add-dep-title" className="add-dep-title">
+            Add dependency → <span>{targetEntityName}</span>
+          </div>
+        </div>
+
+        <div className="add-dep-body">
+          <div>
+            <div className="add-dep-field-label">Type</div>
+            <div className="add-dep-type-cards">
+              {TYPE_CONFIG.map((cfg) => (
+                <button
+                  key={cfg.value}
+                  type="button"
+                  className={`add-dep-type-card ${type === cfg.value ? cfg.selClass : ''}`}
+                  onClick={() => setType(cfg.value)}
+                >
+                  <div className={`add-dep-tc-dot ${cfg.dotClass}`} />
+                  <div className="add-dep-tc-name">{cfg.name}</div>
+                  <div className="add-dep-tc-desc">{cfg.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="add-dep-field-label">
+              Note <span style={{ opacity: 0.5, letterSpacing: 0 }}>(optional)</span>
+            </div>
+            <input
+              type="text"
+              className="add-dep-note-input"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Short note..."
+              maxLength={200}
+            />
+          </div>
+        </div>
+
+        <div className="add-dep-footer">
+          <button type="button" className="add-dep-btn-cancel" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="add-dep-btn-add"
+            onClick={handleSubmit}
+            disabled={createDependency.isPending}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            {createDependency.isPending ? 'Adding...' : 'Add'}
+          </button>
+        </div>
       </div>
     </div>
-    </>
   );
 }

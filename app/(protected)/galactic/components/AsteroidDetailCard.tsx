@@ -11,8 +11,8 @@ import { CollapsibleSection } from './CollapsibleSection';
 import {
   getStatusBadgeStyle,
   renderStars,
-  formatDependencyType,
   getDependencyTypeColor,
+  DependencyRow,
 } from './DetailCardShared';
 import { calculateTaskProgress, calculateDaysRemaining, getDueDateStyle } from '@/lib/galactic/progress';
 
@@ -20,6 +20,8 @@ interface AsteroidDetailCardProps {
   minitaskId: string;
   onClose: () => void;
   onZoomIn?: () => void;
+  onContextMenu?: (object: { id: string; type: 'minitask' | 'subtask'; name: string; metadata?: Record<string, unknown> }, e: React.MouseEvent) => void;
+  onNavigateToSubtask?: (subtaskId: string) => void;
 }
 
 interface MinitaskWithSubtasks {
@@ -69,7 +71,7 @@ function useAsteroidDetails(minitaskId: string | null) {
   });
 }
 
-export function AsteroidDetailCard({ minitaskId, onClose, onZoomIn }: AsteroidDetailCardProps) {
+export function AsteroidDetailCard({ minitaskId, onClose, onZoomIn, onContextMenu, onNavigateToSubtask }: AsteroidDetailCardProps) {
   const [showAddProgress, setShowAddProgress] = useState(false);
   const [expandedHierarchy, setExpandedHierarchy] = useState(false);
   const [expandedDeps, setExpandedDeps] = useState(false);
@@ -106,8 +108,18 @@ export function AsteroidDetailCard({ minitaskId, onClose, onZoomIn }: AsteroidDe
   const statusStyle = getStatusBadgeStyle(data.status);
   const cardTheme = { border: 'rgba(139, 92, 46, 0.5)', header: '#a78b5a', accent: 'rgba(139, 92, 46, 0.2)', accentBorder: 'rgba(139, 92, 46, 0.5)' };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.target !== e.currentTarget && onContextMenu) {
+      onContextMenu({ id: minitaskId, type: 'minitask', name: data.name, metadata: { taskId: data.task_id, moduleId: data.module_id, minitaskId } }, e);
+    }
+  };
+
   return (
     <div
+      onContextMenuCapture={(e) => e.preventDefault()}
+      onContextMenu={handleContextMenu}
       style={{
         position: 'fixed',
         inset: 0,
@@ -221,7 +233,11 @@ export function AsteroidDetailCard({ minitaskId, onClose, onZoomIn }: AsteroidDe
           >
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)', fontFamily: 'Exo 2, sans-serif' }}>
               {subtasks.map((st) => (
-                <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
+                <div
+                  key={st.id}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ id: st.id, type: 'subtask', name: st.name, metadata: { taskId: data.task_id, moduleId: data.module_id, minitaskId, subtaskId: st.id } }, e); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'context-menu' }}
+                >
                   <SubtaskTypeIcon satelliteType={st.satellite_type} size={10} />
                   <span>{st.name}</span>
                 </div>
@@ -242,19 +258,9 @@ export function AsteroidDetailCard({ minitaskId, onClose, onZoomIn }: AsteroidDe
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)', fontFamily: 'Exo 2, sans-serif' }}>
               {dependencies && dependencies.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {dependencies.map((dep) => {
-                    const from = dep.dependent_subtask?.name || '?';
-                    const to = dep.depends_on_subtask?.name || '?';
-                    const typ = dep.dependency_type || 'depends_on';
-                    const color = getDependencyTypeColor(typ);
-                    return (
-                      <div key={dep.id} style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                        <span style={{ color, fontSize: 11, fontWeight: 600, fontFamily: 'Exo 2, sans-serif' }}>{formatDependencyType(typ)}</span>
-                        {dep.note && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 2, fontFamily: 'Exo 2, sans-serif' }}>{dep.note}</div>}
-                        <div style={{ marginTop: 2, fontFamily: 'Exo 2, sans-serif' }}>{from} → {to}</div>
-                      </div>
-                    );
-                  })}
+                  {dependencies.map((dep) => (
+                    <DependencyRow key={dep.id} dep={dep} onNavigateToSubtask={onNavigateToSubtask} />
+                  ))}
                 </div>
               ) : (
                 <div style={{ color: 'rgba(255,255,255,0.5)', fontFamily: 'Exo 2, sans-serif' }}>No dependencies.</div>

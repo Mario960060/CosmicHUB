@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { saveSatelliteData, useInvalidateSatelliteQueries } from '@/lib/satellite/save-satellite-data';
 import { ensureAbsoluteUrl } from '@/lib/utils';
 import { toast } from 'sonner';
-import { FileText, Link as LinkIcon, Plus, FolderOpen } from 'lucide-react';
+import { FileText, Link as LinkIcon, Plus, FolderOpen, GripVertical } from 'lucide-react';
 
 interface DocLink {
   id: string;
@@ -14,23 +14,26 @@ interface DocLink {
   type?: string;
   added_by?: string;
   added_at?: string;
+  order: number;
 }
 
 interface DocumentsContentProps {
   subtaskId: string;
   satelliteData: Record<string, unknown>;
+  canReorder?: boolean;
 }
 
 function getLinks(data: Record<string, unknown>): DocLink[] {
   const raw = data.links;
   if (!Array.isArray(raw)) return [];
-  return raw.map((l: any) => ({
+  return raw.map((l: any, idx: number) => ({
     id: l.id || crypto.randomUUID(),
     url: l.url || '',
     label: l.label || '',
     type: l.type,
     added_by: l.added_by,
     added_at: l.added_at || new Date().toISOString(),
+    order: typeof l.order === 'number' ? l.order : idx,
   }));
 }
 
@@ -43,7 +46,7 @@ function getLinkType(url: string): string {
   return 'other';
 }
 
-export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentProps) {
+export function DocumentsContent({ subtaskId, satelliteData, canReorder = false }: DocumentsContentProps) {
   const { user } = useAuth();
   const invalidate = useInvalidateSatelliteQueries();
   const [tab, setTab] = useState<'files' | 'links'>('links');
@@ -52,6 +55,26 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
   const [newLabel, setNewLabel] = useState('');
   const [showAddLink, setShowAddLink] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  const reorderLinks = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    const sorted = [...links].sort((a, b) => a.order - b.order);
+    const reordered = [...sorted];
+    const [removed] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, removed);
+    const next = reordered.map((l, idx) => ({ ...l, order: idx }));
+    save(next, { user_id: user!.id, action: 'reordered_links', detail: '', actor_name: user!.full_name });
+    setDraggedIndex(toIndex);
+  };
+
+  const handleLinkDragStart = (index: number) => setDraggedIndex(index);
+  const handleLinkDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null) return;
+    if (draggedIndex !== index) reorderLinks(draggedIndex, index);
+  };
+  const handleLinkDragEnd = () => setDraggedIndex(null);
 
   useEffect(() => {
     setLinks(getLinks(satelliteData));
@@ -91,8 +114,9 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
       type: getLinkType(newUrl),
       added_by: user.id,
       added_at: new Date().toISOString(),
+      order: 0,
     };
-    const next = [link, ...links];
+    const next = [link, ...links.map((l, idx) => ({ ...l, order: idx + 1 }))];
     save(next, { user_id: user.id, action: 'added_link', detail: link.label || link.url, actor_name: user.full_name });
     setNewUrl('');
     setNewLabel('');
@@ -290,9 +314,13 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {links.map((link) => (
+            {[...links].sort((a, b) => a.order - b.order).map((link, index) => (
               <div
                 key={link.id}
+                draggable={canReorder}
+                onDragStart={() => canReorder && handleLinkDragStart(index)}
+                onDragOver={(e) => canReorder && handleLinkDragOver(e, index)}
+                onDragEnd={() => handleLinkDragEnd()}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -301,8 +329,18 @@ export function DocumentsContent({ subtaskId, satelliteData }: DocumentsContentP
                   background: 'rgba(0, 0, 0, 0.2)',
                   border: '1px solid rgba(20, 184, 166, 0.15)',
                   borderRadius: '8px',
+                  cursor: canReorder ? 'grab' : 'default',
+                  opacity: draggedIndex === index ? 0.5 : 1,
                 }}
               >
+                {canReorder && (
+                  <div
+                    style={{ cursor: 'grab', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <GripVertical size={16} />
+                  </div>
+                )}
                 <span style={{ fontSize: '20px' }}>{typeIcon(link.type)}</span>
                 <a
                   href={ensureAbsoluteUrl(link.url)}

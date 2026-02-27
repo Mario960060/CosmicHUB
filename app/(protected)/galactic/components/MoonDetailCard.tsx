@@ -14,8 +14,8 @@ import {
   getStatusBadgeStyle,
   getInitials,
   renderStars,
-  formatDependencyType,
   getDependencyTypeColor,
+  DependencyRow,
 } from './DetailCardShared';
 import {
   calculateTaskProgress,
@@ -29,6 +29,8 @@ interface MoonDetailCardProps {
   taskId: string;
   onClose: () => void;
   onZoomIn?: (moduleId: string) => void;
+  onContextMenu?: (object: { id: string; type: 'task' | 'minitask' | 'subtask'; name: string; metadata?: Record<string, unknown> }, e: React.MouseEvent) => void;
+  onNavigateToSubtask?: (subtaskId: string) => void;
 }
 
 interface TaskWithSubtasks {
@@ -87,7 +89,7 @@ function useMoonDetails(taskId: string | null) {
   });
 }
 
-export function MoonDetailCard({ taskId, onClose, onZoomIn }: MoonDetailCardProps) {
+export function MoonDetailCard({ taskId, onClose, onZoomIn, onContextMenu, onNavigateToSubtask }: MoonDetailCardProps) {
   const { user } = useAuth();
   const [showAddProgress, setShowAddProgress] = useState(false);
   const [showAssignTeam, setShowAssignTeam] = useState(false);
@@ -154,8 +156,18 @@ export function MoonDetailCard({ taskId, onClose, onZoomIn }: MoonDetailCardProp
   const statusStyle = getStatusBadgeStyle(data.status);
   const cardTheme = { border: 'rgba(0, 217, 255, 0.3)', header: '#00d9ff', accent: 'rgba(0, 217, 255, 0.15)', accentBorder: 'rgba(0, 217, 255, 0.4)' };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.target !== e.currentTarget && onContextMenu) {
+      onContextMenu({ id: taskId, type: 'task', name: data.name, metadata: { moduleId, taskId } }, e);
+    }
+  };
+
   return (
     <div
+      onContextMenuCapture={(e) => e.preventDefault()}
+      onContextMenu={handleContextMenu}
       style={{
         position: 'fixed',
         inset: 0,
@@ -295,7 +307,11 @@ export function MoonDetailCard({ taskId, onClose, onZoomIn }: MoonDetailCardProp
           >
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)' }}>
               {subtasks.map((st) => (
-                <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
+                <div
+                  key={st.id}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.({ id: st.id, type: 'subtask', name: st.name, metadata: { moduleId, taskId, subtaskId: st.id } }, e); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'context-menu' }}
+                >
                   <SubtaskTypeIcon satelliteType={(st as { satellite_type?: string }).satellite_type} size={10} />
                   <span>{st.name}</span>
                 </div>
@@ -316,19 +332,9 @@ export function MoonDetailCard({ taskId, onClose, onZoomIn }: MoonDetailCardProp
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)' }}>
               {dependencies && dependencies.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {dependencies.map((dep) => {
-                    const from = dep.dependent_subtask?.name || '?';
-                    const to = dep.depends_on_subtask?.name || '?';
-                    const typ = dep.dependency_type || 'depends_on';
-                    const color = getDependencyTypeColor(typ);
-                    return (
-                      <div key={dep.id} style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                        <span style={{ color, fontSize: 11, fontWeight: 600 }}>{formatDependencyType(typ)}</span>
-                        {dep.note && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>{dep.note}</div>}
-                        <div style={{ marginTop: 2 }}>{from} → {to}</div>
-                      </div>
-                    );
-                  })}
+                  {dependencies.map((dep) => (
+                    <DependencyRow key={dep.id} dep={dep} onNavigateToSubtask={onNavigateToSubtask} />
+                  ))}
                 </div>
               ) : (
                 <div style={{ color: 'rgba(255,255,255,0.5)' }}>No dependencies between subtasks.</div>

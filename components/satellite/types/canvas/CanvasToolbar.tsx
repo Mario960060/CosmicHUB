@@ -116,6 +116,7 @@ export function CanvasToolbar({
       {toolBtn('triangle', 'Triangle', 'T', <TriangleIcon />)}
       {toolBtn('diamond', 'Diamond', 'D', <DiamondIcon />)}
       {toolBtn('freehand', 'Free', 'P', <FreehandIcon />)}
+      {toolBtn('eraser', 'Eraser', 'E', <EraserIcon />)}
 
       <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.06)', margin: '0 4px' }} />
 
@@ -306,6 +307,14 @@ function FreehandIcon() {
   return (
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path d="M12 19c-1.5 0-2-1.5-2.5-3-.5-1.5-1-3-2-4.5S5 9 4 8" />
+    </svg>
+  );
+}
+
+function EraserIcon() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path d="M20 20H7L3 16 13 6l4 4 3-3-4-4 7 7-4 4z" />
     </svg>
   );
 }

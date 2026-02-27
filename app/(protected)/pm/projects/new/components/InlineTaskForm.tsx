@@ -9,7 +9,6 @@ import { z } from 'zod';
 const taskSchema = z.object({
   name: z.string().min(2).max(200),
   description: z.string().max(1000).optional(),
-  estimatedHours: z.number().min(0).max(1000).optional(),
   priorityStars: z.number().min(0.5).max(3.0),
 });
 
@@ -38,7 +37,6 @@ export function InlineTaskForm({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [estimatedHours, setEstimatedHours] = useState('10');
   const [priorityStars, setPriorityStars] = useState('1.0');
   const [spacecraftType, setSpacecraftType] = useState('rocky-moon');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -52,21 +50,19 @@ export function InlineTaskForm({
       taskSchema.parse({
         name,
         description: description || undefined,
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
         priorityStars: parseFloat(priorityStars),
       });
       await createTask.mutateAsync({
         moduleId,
         name,
         description: description || undefined,
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+        estimatedHours: null, // calculate based on minitasks
         priorityStars: parseFloat(priorityStars),
         createdBy: user.id,
         spacecraftType,
       });
       setName('');
       setDescription('');
-      setEstimatedHours('10');
       setPriorityStars('1.0');
       setSpacecraftType('rocky-moon');
       setErrors({});
@@ -281,47 +277,16 @@ export function InlineTaskForm({
               })}
             </div>
             <p style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.4)', marginTop: '8px' }}>
-              Tasks appear as moons. Satellites (Questions, Issues, etc.) are added as subtasks.
+              Tasks appear as moons. Minitasks (asteroids) can be added to tasks.
             </p>
           </div>
 
-          {/* Hours + Priority */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-            <div>
-              <label style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: '600',
-                color: '#00d9ff',
-                marginBottom: '8px',
-              }}>
-                Estimated Hours <span style={{ color: '#ef4444' }}>*</span>
-              </label>
-              <input
-                type="number"
-                value={estimatedHours}
-                onChange={(e) => setEstimatedHours(e.target.value)}
-                onFocus={() => setFocusedInput('hours')}
-                onBlur={() => setFocusedInput(null)}
-                placeholder="10"
-                min="0.5"
-                step="0.5"
-                required
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  border: focusedInput === 'hours' ? '1px solid #00d9ff' : errors.estimatedHours ? '1px solid #ef4444' : '1px solid rgba(0, 217, 255, 0.3)',
-                  borderRadius: '12px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  outline: 'none',
-                  transition: 'all 0.3s ease',
-                  boxShadow: focusedInput === 'hours' ? '0 0 20px rgba(0, 217, 255, 0.3)' : 'none',
-                }}
-              />
-              {errors.estimatedHours && <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>{errors.estimatedHours}</p>}
-            </div>
+          <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.5)', marginBottom: '16px' }}>
+            Szacowane godziny będą obliczane na podstawie minitasków.
+          </p>
+
+          {/* Priority */}
+          <div style={{ marginBottom: '20px' }}>
             <div>
               <label style={{
                 display: 'block',

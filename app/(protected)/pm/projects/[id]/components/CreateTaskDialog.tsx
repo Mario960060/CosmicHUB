@@ -4,7 +4,8 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
-import { useCreateTask } from '@/lib/pm/mutations';
+import { useCreateTask, useCreateDependency } from '@/lib/pm/mutations';
+import { DependencyTargetPicker, type SelectedTarget } from '@/components/DependencyTargetPicker';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { X } from 'lucide-react';
 import { z } from 'zod';
@@ -13,7 +14,6 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 const taskSchema = z.object({
   name: z.string().min(2).max(200),
   description: z.string().max(1000).optional(),
-  estimatedHours: z.number().min(0).max(1000).optional(),
   priorityStars: z.number().min(0.5).max(3.0),
 });
 
@@ -27,19 +27,18 @@ const MOON_TYPES = [
 interface CreateTaskDialogProps {
   open: boolean;
   onClose: () => void;
+  projectId: string;
   moduleId: string;
   initialSpacecraftType?: string;
   onSuccess?: (task: { id: string }) => void;
 }
 
-export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftType, onSuccess }: CreateTaskDialogProps) {
+export function CreateTaskDialog({ open, onClose, projectId, moduleId, initialSpacecraftType, onSuccess }: CreateTaskDialogProps) {
   const { confirm, ConfirmDialog: ConfirmDialogEl } = useConfirm();
   const { user } = useAuth();
   const createTask = useCreateTask();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [estimatedHours, setEstimatedHours] = useState('');
-  const [estimatedHoursFromMinitasks, setEstimatedHoursFromMinitasks] = useState(true);
   const [priorityStars, setPriorityStars] = useState('1.0');
   const [dueDate, setDueDate] = useState('');
   const [spacecraftType, setSpacecraftType] = useState<string>('rocky-moon');
@@ -48,6 +47,9 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
   const [focusedInput, setFocusedInput] = useState<string | null>(null);
   const [hoveredClose, setHoveredClose] = useState(false);
   const [hoveredSpacecraft, setHoveredSpacecraft] = useState<string | null>(null);
+  const [dependsOnTargets, setDependsOnTargets] = useState<SelectedTarget[]>([]);
+
+  const createDependency = useCreateDependency();
 
   useEffect(() => {
     if (open && initialSpacecraftType) {
@@ -55,7 +57,7 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
     }
   }, [open, initialSpacecraftType]);
 
-  const hasUnsavedChanges = name.trim() || description.trim() || (!estimatedHoursFromMinitasks && estimatedHours) || dueDate;
+  const hasUnsavedChanges = name.trim() || description.trim() || dueDate || dependsOnTargets.length > 0;
 
   const handleClose = async () => {
     if (hasUnsavedChanges) {
@@ -79,7 +81,6 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
       taskSchema.parse({
         name,
         description: description || undefined,
-        estimatedHours: !estimatedHoursFromMinitasks && estimatedHours ? parseFloat(estimatedHours) : undefined,
         priorityStars: parseFloat(priorityStars),
       });
 
@@ -87,22 +88,36 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
         moduleId,
         name,
         description: description || undefined,
-        estimatedHours: estimatedHoursFromMinitasks ? null : (estimatedHours ? parseFloat(estimatedHours) : null),
+        estimatedHours: null, // always calculate based on minitasks
         priorityStars: parseFloat(priorityStars),
         createdBy: user.id,
         spacecraftType,
         dueDate: dueDate || undefined,
       });
 
+      const newTaskId = (data as { id: string }).id;
+      for (const t of dependsOnTargets) {
+        try {
+          await createDependency.mutateAsync({
+            sourceType: 'task',
+            sourceId: newTaskId,
+            targetType: t.type,
+            targetId: t.id,
+            dependencyType: 'depends_on',
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+
       onSuccess?.(data as { id: string });
       // Reset and close
       setName('');
       setDescription('');
-      setEstimatedHours('');
-      setEstimatedHoursFromMinitasks(true);
       setPriorityStars('1.0');
       setDueDate('');
       setSpacecraftType('rocky-moon');
+      setDependsOnTargets([]);
       setErrors({});
       onClose();
     } catch (err) {
@@ -391,62 +406,9 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
               </p>
             </div>
 
-            {/* Hours + Priority (2 columns) */}
-            <div style={{ marginBottom: '24px' }}>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  marginBottom: '12px',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  color: 'rgba(255, 255, 255, 0.85)',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={estimatedHoursFromMinitasks}
-                  onChange={(e) => {
-                    setEstimatedHoursFromMinitasks(e.target.checked);
-                    if (e.target.checked) setEstimatedHours('');
-                  }}
-                  style={{ width: '18px', height: '18px', accentColor: '#00d9ff', cursor: 'pointer' }}
-                />
-                <span>Oblicz na podstawie szacowanych godzin mini zadań do tasków (księżyców)</span>
-              </label>
-              {!estimatedHoursFromMinitasks && (
-                <input
-                  type="number"
-                  value={estimatedHours}
-                  onChange={(e) => setEstimatedHours(e.target.value)}
-                  onFocus={() => setFocusedInput('hours')}
-                  onBlur={() => setFocusedInput(null)}
-                  placeholder="np. 10"
-                  min="0.5"
-                  step="0.5"
-                  style={{
-                    width: '100%',
-                    padding: '12px 16px',
-                    background: 'rgba(0, 0, 0, 0.3)',
-                    border: focusedInput === 'hours'
-                      ? '1px solid #00d9ff'
-                      : errors.estimatedHours
-                      ? '1px solid #ef4444'
-                      : '1px solid rgba(0, 217, 255, 0.3)',
-                    borderRadius: '12px',
-                    color: '#fff',
-                    fontSize: '14px',
-                    outline: 'none',
-                    transition: 'all 0.3s ease',
-                    boxShadow: focusedInput === 'hours' ? '0 0 20px rgba(0, 217, 255, 0.3)' : 'none',
-                  }}
-                />
-              )}
-              {!estimatedHoursFromMinitasks && errors.estimatedHours && (
-                <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>{errors.estimatedHours}</p>
-              )}
-            </div>
+            <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.5)', marginBottom: '24px' }}>
+              Szacowane godziny będą obliczane na podstawie minitasków.
+            </p>
 
             <div style={{ marginBottom: '24px' }}>
               {/* Priority Stars */}
@@ -524,6 +486,32 @@ export function CreateTaskDialog({ open, onClose, moduleId, initialSpacecraftTyp
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/* Depends on (optional) */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '600',
+                color: '#00d9ff',
+                marginBottom: '8px',
+              }}>
+                Depends on (optional)
+              </label>
+              <p style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.5)', marginBottom: '8px' }}>
+                Ten task zależy od ukończenia:
+              </p>
+              <DependencyTargetPicker
+                projectId={projectId}
+                selectedTargets={dependsOnTargets}
+                onToggleTarget={(t) => {
+                  setDependsOnTargets((prev) => {
+                    const exists = prev.some((x) => x.type === t.type && x.id === t.id);
+                    return exists ? prev.filter((x) => !(x.type === t.type && x.id === t.id)) : [...prev, t];
+                  });
+                }}
+              />
             </div>
 
             {/* Footer */}

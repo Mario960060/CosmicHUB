@@ -3,8 +3,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useCreateModule } from '@/lib/pm/mutations';
+import { useCreateModule, useCreateDependency } from '@/lib/pm/mutations';
 import { DatePicker } from '@/components/ui/DatePicker';
+import { DependencyTargetPicker, type SelectedTarget } from '@/components/DependencyTargetPicker';
 import { X } from 'lucide-react';
 import { z } from 'zod';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
@@ -70,6 +71,9 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
   const [hoveredClose, setHoveredClose] = useState(false);
   const [hoveredPlanet, setHoveredPlanet] = useState<string | null>(null);
   const [hoveredStatus, setHoveredStatus] = useState<string | null>(null);
+  const [dependsOnTargets, setDependsOnTargets] = useState<SelectedTarget[]>([]);
+
+  const createDependency = useCreateDependency();
 
   useEffect(() => {
     if (open && initialPlanetType) {
@@ -79,7 +83,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
     }
   }, [open, initialPlanetType]);
 
-  const hasUnsavedChanges = name.trim() || description.trim() || dueDate || (!estimatedHoursFromTasks && estimatedHours);
+  const hasUnsavedChanges = name.trim() || description.trim() || dueDate || (!estimatedHoursFromTasks && estimatedHours) || dependsOnTargets.length > 0;
 
   const handleClose = async () => {
     if (hasUnsavedChanges) {
@@ -119,6 +123,21 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
         status,
       });
 
+      const newModuleId = (data as { id: string }).id;
+      for (const t of dependsOnTargets) {
+        try {
+          await createDependency.mutateAsync({
+            sourceType: 'module',
+            sourceId: newModuleId,
+            targetType: t.type,
+            targetId: t.id,
+            dependencyType: 'depends_on',
+          });
+        } catch {
+          /* ignore individual dep failures */
+        }
+      }
+
       onSuccess?.(data as { id: string });
       // Reset and close
       setName('');
@@ -130,6 +149,7 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
       setPlanetType('ocean');
       setColor(PLANET_TYPES[0].color);
       setEstimatedHoursFromTasks(true);
+      setDependsOnTargets([]);
       setErrors({});
       onClose();
     } catch (err) {
@@ -579,6 +599,32 @@ export function CreateModuleDialog({ open, onClose, projectId, initialPlanetType
               <p style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.4)', marginTop: '8px' }}>
                 Choose a planet type for galactic visualization
               </p>
+            </div>
+
+            {/* Depends on (optional) */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '600',
+                color: '#00d9ff',
+                marginBottom: '8px',
+              }}>
+                Depends on (optional)
+              </label>
+              <p style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.5)', marginBottom: '8px' }}>
+                Ten moduł zależy od ukończenia:
+              </p>
+              <DependencyTargetPicker
+                projectId={projectId}
+                selectedTargets={dependsOnTargets}
+                onToggleTarget={(t) => {
+                  setDependsOnTargets((prev) => {
+                    const exists = prev.some((x) => x.type === t.type && x.id === t.id);
+                    return exists ? prev.filter((x) => !(x.type === t.type && x.id === t.id)) : [...prev, t];
+                  });
+                }}
+              />
             </div>
 
             {/* Footer */}

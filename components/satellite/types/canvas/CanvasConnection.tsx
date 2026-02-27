@@ -12,7 +12,7 @@ interface CanvasConnectionProps {
   blocks: CanvasBlock[];
   shapes?: CanvasShape[];
   selected: boolean;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onPointerDown?: (e: React.PointerEvent, whichEnd: 'from' | 'to') => void;
   dimmed?: boolean;
@@ -84,7 +84,7 @@ export function CanvasConnection({
     <g
       onClick={(e) => {
         e.stopPropagation();
-        onClick();
+        onClick(e);
       }}
       onPointerDown={onPointerDown ? handlePointerDown : undefined}
       onContextMenu={(e) => {

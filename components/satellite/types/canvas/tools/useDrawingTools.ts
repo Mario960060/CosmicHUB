@@ -81,6 +81,7 @@ export function useDrawingTools({
       if (
         activeTool === 'select' ||
         activeTool === 'block' ||
+        activeTool === 'eraser' ||
         !containerRef.current
       )
         return;

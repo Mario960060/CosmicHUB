@@ -11,7 +11,7 @@ import { IdeasContent } from './types/IdeasContent';
 import { CanvasContent } from './types/CanvasContent';
 import { useSubtask } from '@/lib/workstation/queries';
 import { useUpdateTaskStatus } from '@/lib/workstation/mutations';
-import { useDependencies } from '@/lib/pm/queries';
+import { useDependencies, useDependenciesForEntity } from '@/lib/pm/queries';
 import { useProjectMembers, useModuleMembers, useTaskMembers } from '@/lib/pm/queries';
 import { useUpdateSubtask } from '@/lib/pm/mutations';
 import { ManageDependenciesDialog } from '@/components/ManageDependenciesDialog';
@@ -48,6 +48,7 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
     (subtask as { parent_task?: { module?: { id?: string } } })?.parent_task?.module?.id ??
     null;
   const { data: dependencies } = useDependencies(subtaskId);
+  const { data: depResult } = useDependenciesForEntity('subtask', subtaskId);
   const { data: projectMembers } = useProjectMembers(projectId);
   const { data: moduleMembers } = useModuleMembers(moduleId);
   const { data: taskMembers } = useTaskMembers(taskId);
@@ -136,6 +137,7 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
           <NotesContent
             subtaskId={subtask.id}
             satelliteData={(subtask as { satellite_data?: Record<string, unknown> }).satellite_data ?? {}}
+            canReorder={canDeleteContent}
           />
         );
       case 'checklist':
@@ -143,6 +145,7 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
           <ChecklistContent
             subtaskId={subtask.id}
             satelliteData={(subtask as { satellite_data?: Record<string, unknown> }).satellite_data ?? {}}
+            canReorder={canDeleteContent}
           />
         );
       case 'questions':
@@ -153,6 +156,7 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
             subtaskName={subtask.name}
             projectMembers={projectMembers ?? []}
             canDelete={canDeleteContent}
+            canReorder={canDeleteContent}
           />
         );
       case 'issues':
@@ -168,6 +172,7 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
             isAdmin={user?.role === 'admin'}
             isProjectManager={!!projectMembers?.some((m: { user_id: string; role: string }) => m.user_id === user?.id && m.role === 'manager')}
             isTaskResponsible={!!(taskId && taskMembers?.some((m: { user_id: string; role: string }) => m.user_id === user?.id && m.role === 'responsible'))}
+            canReorder={canDeleteContent}
           />
         );
       case 'documents':
@@ -175,6 +180,7 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
           <DocumentsContent
             subtaskId={subtask.id}
             satelliteData={(subtask as { satellite_data?: Record<string, unknown> }).satellite_data ?? {}}
+            canReorder={canDeleteContent}
           />
         );
       case 'metrics':
@@ -182,6 +188,7 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
           <MetricsContent
             subtaskId={subtask.id}
             satelliteData={(subtask as { satellite_data?: Record<string, unknown> }).satellite_data ?? {}}
+            canReorder={canDeleteContent}
           />
         );
       case 'ideas':
@@ -193,6 +200,7 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
             projectId={(subtask as { parent_task?: { module?: { project?: { id?: string } } } }).parent_task?.module?.project?.id}
             subtaskName={subtask.name}
             projectMembers={projectMembers ?? []}
+            canReorder={canDeleteContent}
           />
         );
       case 'canvas':
@@ -261,7 +269,7 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
         assignedToId={subtask.assigned_to}
         projectMembers={projectMembers ?? []}
         dueDate={subtask.due_date}
-        dependencyCount={dependencies?.length ?? 0}
+        dependencyCount={depResult?.all?.length ?? dependencies?.length ?? 0}
         hideHeaderAssign={satelliteType === 'issues' || satelliteType === 'canvas'}
         activity={((subtask as { satellite_data?: { activity?: ActivityEntry[] } }).satellite_data?.activity as ActivityEntry[]) ?? []}
         onNameChange={handleNameChange}
@@ -284,8 +292,10 @@ export function SatelliteDetailPanel({ subtaskId, initialSubtask, onClose, isMod
         <ManageDependenciesDialog
           open={showDependenciesDialog}
           onClose={() => setShowDependenciesDialog(false)}
-          subtaskId={subtask.id}
-          subtaskName={subtask.name}
+          projectId={projectId ?? ''}
+          sourceType="subtask"
+          sourceId={subtask.id}
+          sourceName={subtask.name}
         />
       )}
     </div>
